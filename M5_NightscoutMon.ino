@@ -2686,6 +2686,7 @@ void checkLoggedErrors() {
 void displayCurrentTimeLCD() {
     static unsigned long lastUpdateMillis = 0; // store the last update time
     const unsigned long updateInterval = 60000; // 60 seconds * 1000 ms
+    static bool lastDisplayWasError = false; // track errors
 
     if (dispPage == 0 && cfg.show_current_time) {
       unsigned long currentMillis = millis();
@@ -2693,49 +2694,53 @@ void displayCurrentTimeLCD() {
       if (currentMillis - lastUpdateMillis >= updateInterval) {
         lastUpdateMillis = currentMillis;
 
-        M5.Lcd.setFreeFont(FSSB12);
-        M5.Lcd.setTextSize(1);
-        M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
         struct tm localTimeInfo;
-        char localTimeStr[32];
-        char timeStr[16];
-        char dateStr[16];
-        int lastMin = 61;
         
         if (getLocalTime(&localTimeInfo)) {
-            switch (cfg.time_format) {
-                case 1:
-                    strftime(timeStr, 15, "%I:%M%p", &localTimeInfo);
-                    timeStr[strlen(timeStr) - 1] = 0;
-                    strcat(timeStr, " ");
-                    break;
-                default:
-                    strftime(timeStr, 15, "%H:%M ", &localTimeInfo);
-                    break;
-            }
-            
-            switch (cfg.date_format) {
-                case 1:
-                    strftime(dateStr, 15, "%m/%d  ", &localTimeInfo);
-                    break;
-                default:
-                    strftime(dateStr, 15, "%d.%m.  ", &localTimeInfo);
-                    break;
-            }
-            
-            strcpy(localTimeStr, timeStr);
-            strcat(localTimeStr, dateStr);
-        } else {
-            strcpy(localTimeStr, "??:??");
-            lastMin = 61;
-        }
+            static int lastMin = 61;
 
-        if (lastMin != localTimeInfo.tm_min) {
-            lastMin = localTimeInfo.tm_min;
-            M5.Lcd.drawString(localTimeStr, 0, 0, GFXFF);
+            if (lastMin != localTimeInfo.tm_min) {
+                lastMin = localTimeInfo.tm_min;
+
+                M5.Lcd.setFreeFont(FSSB12);
+                M5.Lcd.setTextSize(1);
+                M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+
+                char timeStr[16];
+                char dateStr[16];
+
+                switch (cfg.time_format) {
+                    case 1:
+                        strftime(timeStr, sizeof(timeStr), "%I:%M%p", &localTimeInfo);
+                        timeStr[strlen(timeStr) - 1] = '\0';
+                        break;
+                    default:
+                        strftime(timeStr, sizeof(timeStr), "%H:%M ", &localTimeInfo);
+                        break;
+                }
+                
+                switch (cfg.date_format) {
+                    case 1:
+                        strftime(dateStr, sizeof(dateStr), "%m/%d  ", &localTimeInfo);
+                        break;
+                    default:
+                        strftime(dateStr, sizeof(dateStr), "%d.%m.  ", &localTimeInfo);
+                        break;
+                }
+    
+                M5.Lcd.drawString(timeStr, 0, 0, GFXFF);
+                M5.Lcd.drawString(dateStr, strlen(timeStr) * 6, 0, GFXFF);
+
+                lastDisplayWasError = false; // Reset the error flag
+            }
         }
+      } else {
+        if (!lastDisplayWasError) {
+          M5.Lcd.drawString("??:??", 0, 0, GFXFF);
+          lastDisplayWasError = true; // Set the error flag
+        }
+      }
     }
-  }
 }
 
 class AnalogClock {
