@@ -2684,7 +2684,15 @@ void checkLoggedErrors() {
 }
 
 void displayCurrentTimeLCD() {
+    static unsigned long lastUpdateMillis = 0; // store the last update time
+    const unsigned long updateInterval = 60000; // 60 seconds * 1000 ms
+
     if (dispPage == 0 && cfg.show_current_time) {
+      unsigned long currentMillis = millis();
+
+      if (currentMillis - lastUpdateMillis >= updateInterval) {
+        lastUpdateMillis = currentMillis;
+
         M5.Lcd.setFreeFont(FSSB12);
         M5.Lcd.setTextSize(1);
         M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -2723,9 +2731,11 @@ void displayCurrentTimeLCD() {
         }
 
         if (lastMin != localTimeInfo.tm_min) {
+            lastMin = localTimeInfo.tm_min;
             M5.Lcd.drawString(localTimeStr, 0, 0, GFXFF);
         }
     }
+  }
 }
 
 class AnalogClock {
@@ -2786,75 +2796,6 @@ AnalogClock analogClock(160, 110);
 void drawAnalogClock() {
     analogClock.draw();
 }
-
-/* old
-void drawAnalogClock() {
-    if (dispPage == 2) {
-        struct tm localTimeInfo;
-        int lastMin = 61, lastSec = 61;
-        float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0; // Saved H, M, S x & y multipliers
-        float sdeg = 0, mdeg = 0, hdeg = 0;
-        static int osx = 0, osy = 0, omx = 0, omy = 0, ohx = 0, ohy = 0; // Previous H, M, S x & y coords.
-        static bool initial = true;
-
-        if (getLocalTime(&localTimeInfo)) {
-            uint8_t hh = localTimeInfo.tm_hour, mm = localTimeInfo.tm_min, ss = localTimeInfo.tm_sec;  // Get current time
-
-            // Pre-compute hand degrees, x & y coords for a fast screen update
-            sdeg = ss * 6; // 0-59 -> 0-354
-            mdeg = mm * 6 + sdeg * 0.01666667; // 0-59 -> 0-360 - includes seconds
-            hdeg = hh * 30 + mdeg * 0.0833333; // 0-11 -> 0-360 - includes minutes and seconds
-            hx = cos((hdeg - 90) * 0.0174532925);
-            hy = sin((hdeg - 90) * 0.0174532925);
-            mx = cos((mdeg - 90) * 0.0174532925);
-            my = sin((mdeg - 90) * 0.0174532925);
-            sx = cos((sdeg - 90) * 0.0174532925);
-            sy = sin((sdeg - 90) * 0.0174532925);
-        } else {
-            lastMin = 61;
-            lastSec = 61;
-        }
-
-        if (lastMin != localTimeInfo.tm_min || lastSec != localTimeInfo.tm_sec || initial) {
-            if (ss == 0 || initial) {
-                initial = false;
-                M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_BLACK);
-                // Additional clearing lines based on your code
-                M5.Lcd.drawLine(ohx + 1, ohy, 161, 110, TFT_BLACK);
-                M5.Lcd.drawLine(ohx - 1, ohy, 159, 110, TFT_BLACK);
-                M5.Lcd.drawLine(ohx, ohy - 1, 160, 109, TFT_BLACK);
-                M5.Lcd.drawLine(ohx, ohy + 1, 160, 111, TFT_BLACK);
-                ohx = hx * 52 + 160;
-                ohy = hy * 52 + 110;
-                M5.Lcd.drawLine(omx, omy, 160, 110, TFT_BLACK);
-                omx = mx * 74 + 160;
-                omy = my * 74 + 110;
-            }
-
-            M5.Lcd.drawLine(osx, osy, 160, 110, TFT_BLACK);
-            M5.Lcd.drawRoundRect(182, 97, 36, 26, 7, TFT_LIGHTGREY);
-            M5.Lcd.setTextDatum(MC_DATUM);
-            M5.Lcd.setFreeFont(FSSB9);
-            M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-            M5.Lcd.drawString(String(localTimeInfo.tm_mday), 200, 108, GFXFF);
-            M5.Lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
-            M5.Lcd.drawString(cfg.userName, 160, 145, GFXFF);
-
-            osx = sx * 78 + 160;
-            osy = sy * 78 + 110;
-            M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_WHITE);
-            M5.Lcd.drawLine(ohx + 1, ohy, 161, 110, TFT_WHITE);
-            M5.Lcd.drawLine(ohx - 1, ohy, 159, 110, TFT_WHITE);
-            M5.Lcd.drawLine(ohx, ohy - 1, 160, 109, TFT_WHITE);
-            M5.Lcd.drawLine(ohx, ohy + 1, 160, 111, TFT_WHITE);
-            M5.Lcd.drawLine(omx, omy, 160, 110, TFT_WHITE);
-            M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
-
-            M5.Lcd.fillCircle(160, 110, 3, TFT_RED);
-        }
-    }
-}
-*/
 
 void processUDPPackets() {
     if (is_task_bootstrapping) {
