@@ -234,7 +234,8 @@ class AnalogClock {
       struct tm localTimeInfo;
       uint16_t clockFaceColor;
       int lastSec = -1; // To check if a second has passed
-      float lastSAngle = -1.0; 
+      float lastSAngle = -1.0;
+      float lastMAngle = -1.0;
 
       // Helper function to draw a hand
       void drawHand(float angle, int16_t length, uint16_t color, bool erase = false) {
@@ -311,7 +312,10 @@ public:
             if (lastSAngle != -1.0) { // Make sure we've drawn before
                 drawHand(lastSAngle, 78, TFT_BLACK, true);
             }
-
+            // Clearing the minute hand
+            if (lastMAngle != -1.0) { 
+                drawHand(lastMAngle, 74, TFT_BLACK, true);
+            }
             float sAngle = ss * TWO_PI / 60;
             float mAngle = (mm + ss / 60.0) * TWO_PI / 60;
             float hAngle = (hh + mm / 60.0) * TWO_PI / 12;
@@ -323,7 +327,8 @@ public:
             M5.Lcd.fillCircle(cx, cy, 3, TFT_RED);  // Draw clock center
             lastSec = ss;
             lastSAngle = sAngle;
-      }
+            lastMAngle = mAngle;
+        }
     }
 };
 
