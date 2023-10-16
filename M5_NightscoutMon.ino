@@ -1714,13 +1714,305 @@ void drawSegment(int x, int y, int r1, int r2, float a, int col)
   M5.Lcd.fillTriangle(x1,y1,x2,y2,x3,y3,col);
 }
 
-void draw_page() {
-  char tmpstr[255];
+//--------------
+
+void configure_lcd() {
+    M5.Lcd.setTextDatum(TL_DATUM);
+    M5.Lcd.setTextColor(WHITE, BLACK);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setCursor(0, 0);
+}
+
+// Utility Functions
+uint16_t calculate_sgv_color() {
+    // calculate SGV color
+    uint16_t glColor = TFT_GREEN;
+    if(ns.sensSgv<cfg.yellow_low || ns.sensSgv>cfg.yellow_high) {
+      glColor=TFT_YELLOW; // warning is YELLOW
+    }
+    if(ns.sensSgv<cfg.red_low || ns.sensSgv>cfg.red_high) {
+      glColor=TFT_RED; // alert is RED
+    }
+    return glColor;
+}
+
+void draw_sgv(uint16_t glColor) {
+    // display SGV
+    char tmpstr[255];
+    sprintf(tmpstr, "Glyk: %4.1f %s", ns.sensSgv, ns.sensDir);
+    Serial.println(tmpstr);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setTextDatum(TL_DATUM);
+    M5.Lcd.setTextColor(glColor, TFT_BLACK);
+    char sensSgvStr[30];
+    // int smaller_font = 0;
+    if( cfg.show_mgdl ) {
+      if(ns.sensSgvMgDl<100) {
+        sprintf(sensSgvStr, "%2.0f", ns.sensSgvMgDl);
+        M5.Lcd.setFreeFont(FSSB24);
+      } else {
+        sprintf(sensSgvStr, "%3.0f", ns.sensSgvMgDl);
+        M5.Lcd.setFreeFont(FSSB24);
+      }
+    } else {
+      if(ns.sensSgv<10) {
+        sprintf(sensSgvStr, "%3.1f", ns.sensSgv);
+        M5.Lcd.setFreeFont(FSSB24);
+      } else {
+        sprintf(sensSgvStr, "%4.1f", ns.sensSgv);
+        M5.Lcd.setFreeFont(FSSB24); //18
+      }
+    }
+    M5.Lcd.fillRect(0, 0, 100, 40, TFT_BLACK);
+    M5.Lcd.drawString(sensSgvStr, 0, 0, GFXFF);
+}
+
+void draw_delta() {
+    // display DELTA
+    M5.Lcd.setTextDatum(TR_DATUM);
+    M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    M5.Lcd.fillRect(220, 0, 100, 40, TFT_BLACK);
+    M5.Lcd.drawString(ns.delta_display, 319, 0, GFXFF);
+}
+
+int calculate_sensor_time_difference(struct tm timeinfo) {
+    // calculate sensor time difference
+    int sensorDifSec=0;
+    if(!getLocalTime(&timeinfo)){
+      sensorDifSec=24*60*60; // too much
+    } else {
+      Serial.print("Local time: "); Serial.print(timeinfo.tm_hour); Serial.print(":"); Serial.print(timeinfo.tm_min); Serial.print(":"); Serial.print(timeinfo.tm_sec); Serial.print(" DST "); Serial.println(timeinfo.tm_isdst);
+      sensorDifSec=difftime(mktime(&timeinfo), ns.sensTime);
+    }
+    Serial.print("Sensor time difference = "); Serial.print(sensorDifSec); Serial.println(" sec");
+    unsigned int sensorDifMin = (sensorDifSec+30)/60;
+    uint16_t tdColor = TFT_LIGHTGREY;
+    if(sensorDifMin>5) {
+      tdColor = TFT_WHITE;
+      if(sensorDifMin>15) {
+        tdColor = TFT_RED;
+      }
+    }
+    return sensorDifSec;
+}
+
+
+void draw_time(struct tm timeinfo, int sensorDifMin) {
+    // get time - need update
+    char datetimeStr[30];
+    //struct tm timeinfo;
+    if(cfg.show_current_time) {
+      if(getLocalTime(&timeinfo)) {
+        sprintf(datetimeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);  
+      } else {
+        strcpy(datetimeStr, "??:??");
+      }
+    } else {
+      sprintf(datetimeStr, "%02d:%02d", ns.sensTm.tm_hour, ns.sensTm.tm_min);
+    }
+        
+
+    // display time since last valid data
+    uint16_t tdColor = TFT_LIGHTGREY;
+    M5.Lcd.fillRoundRect(0, 44, 68, 22, 7, tdColor);
+    M5.Lcd.setTextSize(1);
+    M5.Lcd.setFreeFont(FSS9);
+    M5.Lcd.setTextDatum(MC_DATUM);
+    M5.Lcd.setTextColor(TFT_BLACK, tdColor);
+    if(sensorDifMin>99) {
+      M5.Lcd.drawString("Err min", 34, 53, GFXFF);
+    } else {
+      M5.Lcd.drawString(String(sensorDifMin)+" min", 34, 53, GFXFF);
+    }
+}
+
+void fetch_temperature_and_humidity(float &tmprc, float &humid) {
+    #ifndef ARDUINO_M5STACK_Core2
+      // get temperature and humidity
+      float tmprc=dht12.readTemperature(cfg.temperature_unit);
+      float humid=dht12.readHumidity();
+      if(tmprc==float(0.01) || tmprc==float(0.02) || tmprc==float(0.03)) { // dht12 error, lets try sht30
+        if(sht30.get()==0){
+          tmprc = sht30.cTemp;
+          humid = sht30.humidity;
+          switch(cfg.temperature_unit) {
+            case 2: //K
+              tmprc += 273.15;
+              break;
+            case 3: //F
+              tmprc = tmprc * 1.8 + 32.0;
+              break;
+          }
+        } else {
+          tmprc = float(0.04);
+          humid = float(0.04);
+        }
+      }
+    #endif
+}
+
+void draw_temperature_and_humidity() {
+    #ifndef ARDUINO_M5STACK_Core2
+        // display temperature
+        // Serial.print("tmprc="); Serial.println(tmprc);
+        M5.Lcd.fillRect(0, 180, 88, 30, TFT_BLACK);
+        if(tmprc!=float(0.01) && tmprc!=float(0.02) && tmprc!=float(0.03) && tmprc!=float(0.04)) { // not an error
+          M5.Lcd.setTextDatum(BL_DATUM);
+          M5.Lcd.setFreeFont(FSS12); // CF_RT24
+          M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+          String tmprcStr=String(tmprc, 1);
+          int tw=M5.Lcd.textWidth(tmprcStr);
+          M5.Lcd.drawString(tmprcStr, 7, 210, GFXFF);
+          M5.Lcd.setFreeFont(FSS9);
+          int ow=M5.Lcd.textWidth("o");
+          M5.Lcd.drawString("o", 7+tw+2, 199, GFXFF);
+          M5.Lcd.setFreeFont(FSS12);
+          switch(cfg.temperature_unit) {
+            case 1:
+              M5.Lcd.drawString("C", 7+tw+ow+4, 210, GFXFF);
+              break;
+            case 2:
+              M5.Lcd.drawString("K", 7+tw+ow+4, 210, GFXFF);
+              break;
+            case 3:
+              M5.Lcd.drawString("F", 7+tw+ow+4, 210, GFXFF);
+              break;
+          }
+        }
+        
+        // display humidity
+        // Serial.print("humid="); Serial.println(humid);
+        M5.Lcd.fillRect(250, 185, 70, 25, TFT_BLACK);
+        if(humid!=float(0.01) && humid!=float(0.02) && humid!=float(0.03) && humid!=float(0.04)) { // not an error
+          M5.Lcd.setTextDatum(BR_DATUM);
+          M5.Lcd.setFreeFont(FSS12);
+          M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+          String humidStr=String(humid, 0);
+          humidStr += "%";
+          M5.Lcd.drawString(humidStr, 310, 210, GFXFF);
+        }
+      #endif
+}
+
+void draw_clock(struct tm timeinfo, uint16_t glColor) {
+  // draw clock
+      float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
+      float sdeg=0, mdeg=0, hdeg=0;
+      uint16_t x0=0, x1=0, yy0=0, yy1=0;
+    
+      uint8_t hh=timeinfo.tm_hour, mm=timeinfo.tm_min, ss=timeinfo.tm_sec;  // Get current time
+
+      // Draw clock face
+      M5.Lcd.fillCircle(160, 110, 98, glColor);
+      M5.Lcd.fillCircle(160, 110, 92, TFT_BLACK);
+    
+      // Draw 12 lines
+      for(int i = 0; i<360; i+= 30) {
+        sx = cos((i-90)*0.0174532925);
+        sy = sin((i-90)*0.0174532925);
+        x0 = sx*94+160;
+        yy0 = sy*94+110;
+        x1 = sx*80+160;
+        yy1 = sy*80+110;
+    
+        M5.Lcd.drawLine(x0, yy0, x1, yy1, glColor);
+      }
+      
+      // Draw 60 dots
+      for(int i = 0; i<360; i+= 6) {
+        sx = cos((i-90)*0.0174532925);
+        sy = sin((i-90)*0.0174532925);
+        x0 = sx*82+160;
+        yy0 = sy*82+110;
+        // Draw minute markers
+        M5.Lcd.drawPixel(x0, yy0, TFT_WHITE);
+        
+        // Draw main quadrant dots
+        if(i==0 || i==180) M5.Lcd.fillCircle(x0, yy0, 2, TFT_WHITE);
+        if(i==90 || i==270) M5.Lcd.fillCircle(x0, yy0, 2, TFT_WHITE);
+      }
+    
+      M5.Lcd.fillCircle(160, 110, 3, TFT_WHITE);
+
+      // draw day
+      M5.Lcd.drawRoundRect(182, 97, 36, 26, 7, TFT_LIGHTGREY);
+      M5.Lcd.setTextDatum(MC_DATUM);
+      M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+      M5.Lcd.setFreeFont(FSSB9);
+      M5.Lcd.drawString(String(timeinfo.tm_mday), 200, 108, GFXFF);
+    
+      // draw name
+      M5.Lcd.setTextDatum(MC_DATUM);
+      M5.Lcd.setFreeFont(FSSB9);
+      M5.Lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      M5.Lcd.drawString(cfg.userName, 160, 145, GFXFF);
   
-  M5.Lcd.setTextDatum(TL_DATUM);
-  M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.setTextSize(1);
-  M5.Lcd.setCursor(0, 0);
+      // Pre-compute hand degrees, x & y coords for a fast screen update
+      sdeg = ss*6;                  // 0-59 -> 0-354
+      mdeg = mm*6+sdeg*0.01666667;  // 0-59 -> 0-360 - includes seconds
+      hdeg = hh*30+mdeg*0.0833333;  // 0-11 -> 0-360 - includes minutes and seconds
+      hx = cos((hdeg-90)*0.0174532925);    
+      hy = sin((hdeg-90)*0.0174532925);
+      mx = cos((mdeg-90)*0.0174532925);    
+      my = sin((mdeg-90)*0.0174532925);
+      sx = cos((sdeg-90)*0.0174532925);    
+      sy = sin((sdeg-90)*0.0174532925);
+
+      if (ss==0 || initial) {
+        initial = 0;
+        // Erase hour and minute hand positions every minute
+        M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_BLACK);
+        M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_BLACK);
+        M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_BLACK);
+        M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_BLACK);
+        M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_BLACK);
+        ohx = hx*52+160;    
+        ohy = hy*52+110;
+        M5.Lcd.drawLine(omx, omy, 160, 110, TFT_BLACK);
+        omx = mx*74+160;    
+        omy = my*74+110;
+      }
+  
+      // Redraw new hand positions, hour and minute hands not erased here to avoid flicker
+      M5.Lcd.drawLine(osx, osy, 160, 110, TFT_BLACK);
+      osx = sx*78+160;    
+      osy = sy*78+110;
+      M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_WHITE);
+      M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_WHITE);
+      M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_WHITE);
+      M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_WHITE);
+      M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_WHITE);
+      M5.Lcd.drawLine(omx, omy, 160, 110, TFT_WHITE);
+      M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
+  
+      M5.Lcd.fillCircle(160, 110, 3, TFT_RED);      
+
+      // draw angle arrow  
+      int ay=0;
+      if(ns.arrowAngle>=45)
+        ay=4;
+      else
+        if(ns.arrowAngle>-45)
+          ay=18;
+        else
+          ay=30;
+      M5.Lcd.fillRect(262, 80, 58, 60, TFT_BLACK);
+      if(ns.arrowAngle!=180)
+        drawArrow(280, ay+90, 10, ns.arrowAngle+85, 28, 28, glColor);
+        
+      handleAlarmsInfoLine(&ns);
+      drawBatteryStatus(icon_xpos[2], icon_ypos[2]);
+      drawLogWarningIcon();
+}
+
+
+void draw_page() {
+    char tmpstr[255];
+    struct tm timeinfo;
+    float tmprc, humid;
+    
+    configure_lcd();  
+
 
   switch(dispPage) {
     case 0: {
@@ -2031,262 +2323,14 @@ void draw_page() {
     break;
    
     case 2: {
-      // calculate SGV color
-      uint16_t glColor = TFT_GREEN;
-      if(ns.sensSgv<cfg.yellow_low || ns.sensSgv>cfg.yellow_high) {
-        glColor=TFT_YELLOW; // warning is YELLOW
-      }
-      if(ns.sensSgv<cfg.red_low || ns.sensSgv>cfg.red_high) {
-        glColor=TFT_RED; // alert is RED
-      }
-
-      // display SGV
-      sprintf(tmpstr, "Glyk: %4.1f %s", ns.sensSgv, ns.sensDir);
-      Serial.println(tmpstr);
-      M5.Lcd.setTextSize(1);
-      M5.Lcd.setTextDatum(TL_DATUM);
-      M5.Lcd.setTextColor(glColor, TFT_BLACK);
-      char sensSgvStr[30];
-      // int smaller_font = 0;
-      if( cfg.show_mgdl ) {
-        if(ns.sensSgvMgDl<100) {
-          sprintf(sensSgvStr, "%2.0f", ns.sensSgvMgDl);
-          M5.Lcd.setFreeFont(FSSB24);
-        } else {
-          sprintf(sensSgvStr, "%3.0f", ns.sensSgvMgDl);
-          M5.Lcd.setFreeFont(FSSB24);
-        }
-      } else {
-        if(ns.sensSgv<10) {
-          sprintf(sensSgvStr, "%3.1f", ns.sensSgv);
-          M5.Lcd.setFreeFont(FSSB24);
-        } else {
-          sprintf(sensSgvStr, "%4.1f", ns.sensSgv);
-          M5.Lcd.setFreeFont(FSSB24); //18
-        }
-      }
-      M5.Lcd.fillRect(0, 0, 100, 40, TFT_BLACK);
-      M5.Lcd.drawString(sensSgvStr, 0, 0, GFXFF);
-
-      // display DELTA
-      M5.Lcd.setTextDatum(TR_DATUM);
-      M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-      M5.Lcd.fillRect(220, 0, 100, 40, TFT_BLACK);
-      M5.Lcd.drawString(ns.delta_display, 319, 0, GFXFF);
-
-      // get time - need update
-      char datetimeStr[30];
-      struct tm timeinfo;
-      if(cfg.show_current_time) {
-        if(getLocalTime(&timeinfo)) {
-          sprintf(datetimeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);  
-        } else {
-          strcpy(datetimeStr, "??:??");
-        }
-      } else {
-        sprintf(datetimeStr, "%02d:%02d", ns.sensTm.tm_hour, ns.sensTm.tm_min);
-      }
-          
-      // calculate sensor time difference
-      int sensorDifSec=0;
-      if(!getLocalTime(&timeinfo)){
-        sensorDifSec=24*60*60; // too much
-      } else {
-        Serial.print("Local time: "); Serial.print(timeinfo.tm_hour); Serial.print(":"); Serial.print(timeinfo.tm_min); Serial.print(":"); Serial.print(timeinfo.tm_sec); Serial.print(" DST "); Serial.println(timeinfo.tm_isdst);
-        sensorDifSec=difftime(mktime(&timeinfo), ns.sensTime);
-      }
-      Serial.print("Sensor time difference = "); Serial.print(sensorDifSec); Serial.println(" sec");
-      unsigned int sensorDifMin = (sensorDifSec+30)/60;
-      uint16_t tdColor = TFT_LIGHTGREY;
-      if(sensorDifMin>5) {
-        tdColor = TFT_WHITE;
-        if(sensorDifMin>15) {
-          tdColor = TFT_RED;
-        }
-      }
-      // display time since last valid data
-      M5.Lcd.fillRoundRect(0, 44, 68, 22, 7, tdColor);
-      M5.Lcd.setTextSize(1);
-      M5.Lcd.setFreeFont(FSS9);
-      M5.Lcd.setTextDatum(MC_DATUM);
-      M5.Lcd.setTextColor(TFT_BLACK, tdColor);
-      if(sensorDifMin>99) {
-        M5.Lcd.drawString("Err min", 34, 53, GFXFF);
-      } else {
-        M5.Lcd.drawString(String(sensorDifMin)+" min", 34, 53, GFXFF);
-      }
-
-      #ifdef ARDUINO_M5STACK_Core2
-        // no temeperature and humidity readings (yet)
-      #else
-        // get temperature and humidity
-        float tmprc=dht12.readTemperature(cfg.temperature_unit);
-        float humid=dht12.readHumidity();
-        if(tmprc==float(0.01) || tmprc==float(0.02) || tmprc==float(0.03)) { // dht12 error, lets try sht30
-          if(sht30.get()==0){
-            tmprc = sht30.cTemp;
-            humid = sht30.humidity;
-            switch(cfg.temperature_unit) {
-              case 2: //K
-                tmprc += 273.15;
-                break;
-              case 3: //F
-                tmprc = tmprc * 1.8 + 32.0;
-                break;
-            }
-          } else {
-            tmprc = float(0.04);
-            humid = float(0.04);
-          }
-        }
-        // display temperature
-        // Serial.print("tmprc="); Serial.println(tmprc);
-        M5.Lcd.fillRect(0, 180, 88, 30, TFT_BLACK);
-        if(tmprc!=float(0.01) && tmprc!=float(0.02) && tmprc!=float(0.03) && tmprc!=float(0.04)) { // not an error
-          M5.Lcd.setTextDatum(BL_DATUM);
-          M5.Lcd.setFreeFont(FSS12); // CF_RT24
-          M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-          String tmprcStr=String(tmprc, 1);
-          int tw=M5.Lcd.textWidth(tmprcStr);
-          M5.Lcd.drawString(tmprcStr, 7, 210, GFXFF);
-          M5.Lcd.setFreeFont(FSS9);
-          int ow=M5.Lcd.textWidth("o");
-          M5.Lcd.drawString("o", 7+tw+2, 199, GFXFF);
-          M5.Lcd.setFreeFont(FSS12);
-          switch(cfg.temperature_unit) {
-            case 1:
-              M5.Lcd.drawString("C", 7+tw+ow+4, 210, GFXFF);
-              break;
-            case 2:
-              M5.Lcd.drawString("K", 7+tw+ow+4, 210, GFXFF);
-              break;
-            case 3:
-              M5.Lcd.drawString("F", 7+tw+ow+4, 210, GFXFF);
-              break;
-          }
-        }
-        
-        // display humidity
-        // Serial.print("humid="); Serial.println(humid);
-        M5.Lcd.fillRect(250, 185, 70, 25, TFT_BLACK);
-        if(humid!=float(0.01) && humid!=float(0.02) && humid!=float(0.03) && humid!=float(0.04)) { // not an error
-          M5.Lcd.setTextDatum(BR_DATUM);
-          M5.Lcd.setFreeFont(FSS12);
-          M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-          String humidStr=String(humid, 0);
-          humidStr += "%";
-          M5.Lcd.drawString(humidStr, 310, 210, GFXFF);
-        }
-      #endif
-
-      // draw clock
-      float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
-      float sdeg=0, mdeg=0, hdeg=0;
-      uint16_t x0=0, x1=0, yy0=0, yy1=0;
-    
-      uint8_t hh=timeinfo.tm_hour, mm=timeinfo.tm_min, ss=timeinfo.tm_sec;  // Get current time
-
-      // Draw clock face
-      M5.Lcd.fillCircle(160, 110, 98, glColor);
-      M5.Lcd.fillCircle(160, 110, 92, TFT_BLACK);
-    
-      // Draw 12 lines
-      for(int i = 0; i<360; i+= 30) {
-        sx = cos((i-90)*0.0174532925);
-        sy = sin((i-90)*0.0174532925);
-        x0 = sx*94+160;
-        yy0 = sy*94+110;
-        x1 = sx*80+160;
-        yy1 = sy*80+110;
-    
-        M5.Lcd.drawLine(x0, yy0, x1, yy1, glColor);
-      }
-      
-      // Draw 60 dots
-      for(int i = 0; i<360; i+= 6) {
-        sx = cos((i-90)*0.0174532925);
-        sy = sin((i-90)*0.0174532925);
-        x0 = sx*82+160;
-        yy0 = sy*82+110;
-        // Draw minute markers
-        M5.Lcd.drawPixel(x0, yy0, TFT_WHITE);
-        
-        // Draw main quadrant dots
-        if(i==0 || i==180) M5.Lcd.fillCircle(x0, yy0, 2, TFT_WHITE);
-        if(i==90 || i==270) M5.Lcd.fillCircle(x0, yy0, 2, TFT_WHITE);
-      }
-    
-      M5.Lcd.fillCircle(160, 110, 3, TFT_WHITE);
-
-      // draw day
-      M5.Lcd.drawRoundRect(182, 97, 36, 26, 7, TFT_LIGHTGREY);
-      M5.Lcd.setTextDatum(MC_DATUM);
-      M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-      M5.Lcd.setFreeFont(FSSB9);
-      M5.Lcd.drawString(String(timeinfo.tm_mday), 200, 108, GFXFF);
-    
-      // draw name
-      M5.Lcd.setTextDatum(MC_DATUM);
-      M5.Lcd.setFreeFont(FSSB9);
-      M5.Lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      M5.Lcd.drawString(cfg.userName, 160, 145, GFXFF);
-  
-      // Pre-compute hand degrees, x & y coords for a fast screen update
-      sdeg = ss*6;                  // 0-59 -> 0-354
-      mdeg = mm*6+sdeg*0.01666667;  // 0-59 -> 0-360 - includes seconds
-      hdeg = hh*30+mdeg*0.0833333;  // 0-11 -> 0-360 - includes minutes and seconds
-      hx = cos((hdeg-90)*0.0174532925);    
-      hy = sin((hdeg-90)*0.0174532925);
-      mx = cos((mdeg-90)*0.0174532925);    
-      my = sin((mdeg-90)*0.0174532925);
-      sx = cos((sdeg-90)*0.0174532925);    
-      sy = sin((sdeg-90)*0.0174532925);
-
-      if (ss==0 || initial) {
-        initial = 0;
-        // Erase hour and minute hand positions every minute
-        M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_BLACK);
-        M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_BLACK);
-        M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_BLACK);
-        M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_BLACK);
-        M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_BLACK);
-        ohx = hx*52+160;    
-        ohy = hy*52+110;
-        M5.Lcd.drawLine(omx, omy, 160, 110, TFT_BLACK);
-        omx = mx*74+160;    
-        omy = my*74+110;
-      }
-  
-      // Redraw new hand positions, hour and minute hands not erased here to avoid flicker
-      M5.Lcd.drawLine(osx, osy, 160, 110, TFT_BLACK);
-      osx = sx*78+160;    
-      osy = sy*78+110;
-      M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_WHITE);
-      M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_WHITE);
-      M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_WHITE);
-      M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_WHITE);
-      M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_WHITE);
-      M5.Lcd.drawLine(omx, omy, 160, 110, TFT_WHITE);
-      M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
-  
-      M5.Lcd.fillCircle(160, 110, 3, TFT_RED);      
-
-      // draw angle arrow  
-      int ay=0;
-      if(ns.arrowAngle>=45)
-        ay=4;
-      else
-        if(ns.arrowAngle>-45)
-          ay=18;
-        else
-          ay=30;
-      M5.Lcd.fillRect(262, 80, 58, 60, TFT_BLACK);
-      if(ns.arrowAngle!=180)
-        drawArrow(280, ay+90, 10, ns.arrowAngle+85, 28, 28, glColor);
-        
-      handleAlarmsInfoLine(&ns);
-      drawBatteryStatus(icon_xpos[2], icon_ypos[2]);
-      drawLogWarningIcon();
+      uint16_t glColor = calculate_sgv_color();
+      draw_sgv(glColor);
+      draw_delta();
+      int sensorDifMin = calculate_sensor_time_difference(timeinfo);
+      draw_time(timeinfo, sensorDifMin);
+      fetch_temperature_and_humidity(tmprc, humid);
+      draw_temperature_and_humidity();
+      draw_clock(timeinfo, glColor);
     }
     break;
     
@@ -2744,6 +2788,9 @@ void displayCurrentTimeLCD() {
 }
 
 class AnalogClock {
+    private:
+      unsigned long lastUpdate = 0;
+
     int16_t cx, cy; // Center of the clock
     struct tm localTimeInfo;
     int lastMin = 61, lastSec = 61;
@@ -2757,8 +2804,8 @@ class AnalogClock {
     void drawHand(float multiplier, int16_t length, uint16_t color, int16_t &ox, int16_t &oy) {
         int16_t nx = multiplier * length + cx;
         int16_t ny = multiplier * length + cy;
-        M5.Lcd.drawLine(ox, oy, cx, cy, TFT_BLACK);
-        M5.Lcd.drawLine(nx, ny, cx, cy, color);
+        M5.Lcd.drawLine(cx, cy, ox, oy, TFT_BLACK);
+        M5.Lcd.drawLine(cx, cy, nx, ny, color);
         ox = nx;
         oy = ny;
     }
@@ -2767,6 +2814,9 @@ public:
     AnalogClock(int16_t centerX, int16_t centerY) : cx(centerX), cy(centerY) {}
 
     void draw() {
+        unsigned long currentMillis = millis();
+        if (currentMillis - lastUpdate < 1000) return;
+
         if (dispPage != 2) return;
         if (!getLocalTime(&localTimeInfo)) return;
 
@@ -2790,9 +2840,9 @@ public:
             drawHand(sx, 78, TFT_RED, osx, osy);
 
             M5.Lcd.fillCircle(cx, cy, 3, TFT_RED);
-            lastMin = mm;
             lastSec = ss;
         }
+        lastUpdate = currentMillis;
     }
 };
 
