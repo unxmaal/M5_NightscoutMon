@@ -187,8 +187,6 @@ boolean mDNSactive = false;
     #define M_PI 3.14159265358979323846
 #endif
 
-void draw_page();
-
 WiFiMulti WiFiMultiple;
 
 unsigned long msCount;
@@ -214,8 +212,89 @@ bool is_task_bootstrapping = 0;
 unsigned long lastWebServerCheck = 0;
 unsigned long lastNightscoutCheck = 0;
 unsigned long lastLoggedErrorsCheck = 0;
+uint16_t glColor = TFT_GREEN;
 
 struct NSinfo ns;
+
+class AnalogClock {
+    private:
+      unsigned long lastUpdate = 0;
+      int16_t cx, cy; // Center of the clock
+      struct tm localTimeInfo;
+      uint16_t clockFaceColor;
+      int lastSec = -1; // To check if a second has passed
+
+      // Helper function to draw a hand
+      void drawHand(float angle, int16_t length, uint16_t color) {
+          int16_t nx = cos(angle - PI / 2) * length + cx;
+          int16_t ny = sin(angle - PI / 2) * length + cy;
+          M5.Lcd.drawLine(cx, cy, nx, ny, color);
+      }
+
+      // Helper function to draw the clock face
+      void drawFace() {
+          // Draw clock outer circle
+          M5.Lcd.drawCircle(cx, cy, 80, TFT_WHITE);
+          
+          // Draw hour markers
+          for (int i = 0; i < 12; i++) {
+              float angle = i * TWO_PI / 12 - PI / 2;  // Adjusting for the 12 o'clock position
+              int16_t x0 = cos(angle) * 70 + cx;      // Inner points for hour markers
+              int16_t y0 = sin(angle) * 70 + cy;
+              int16_t x1 = cos(angle) * 80 + cx;      // Outer points for hour markers
+              int16_t y1 = sin(angle) * 80 + cy;
+              M5.Lcd.drawLine(x0, y0, x1, y1, TFT_WHITE);
+          }
+
+          // Draw minute markers
+          for (int i = 0; i < 60; i++) {
+              if (i % 5 != 0) {  // Skip the main hour markers
+                  float angle = i * TWO_PI / 60 - PI / 2;  // Adjusting for the 12 o'clock position
+                  int16_t x0 = cos(angle) * 76 + cx;      // Points for minute markers
+                  int16_t y0 = sin(angle) * 76 + cy;
+                  M5.Lcd.drawPixel(x0, y0, TFT_WHITE);
+              }
+          }
+      }      
+
+public:
+    AnalogClock(int16_t centerX, int16_t centerY, uint16_t color) : cx(centerX), cy(centerY), clockFaceColor(color){}
+    
+    void updateColor(uint16_t color) {
+        clockFaceColor = color;
+        lastSec = -1; // Force a redraw on next draw call
+    }
+
+    void drawClock() {
+        if (dispPage != 2) return;
+        if (!getLocalTime(&localTimeInfo)) return;
+
+        uint8_t hh = localTimeInfo.tm_hour % 12, mm = localTimeInfo.tm_min, ss = localTimeInfo.tm_sec;  // Get current time
+
+        if (lastSec != ss) {  // If a second has passed
+            M5.Lcd.fillCircle(cx, cy, 80, TFT_BLACK);  // Clear the clock face
+
+            float sAngle = ss * TWO_PI / 60;
+            float mAngle = (mm + ss / 60.0) * TWO_PI / 60;
+            float hAngle = (hh + mm / 60.0) * TWO_PI / 12;
+
+            drawHand(hAngle, 52, TFT_WHITE);
+            drawHand(mAngle, 74, TFT_WHITE);
+            drawHand(sAngle, 78, TFT_RED);
+
+            M5.Lcd.fillCircle(cx, cy, 80, clockFaceColor);
+            M5.Lcd.fillCircle(cx, cy, 3, TFT_RED);  // Draw clock center
+            lastSec = ss;
+        }
+    }
+};
+
+AnalogClock analogClock(160, 110, TFT_WHITE);
+void drawAnalogClock(uint16_t mycolor) {
+    analogClock.updateColor(mycolor);
+    analogClock.drawClock();
+}
+void draw_page();
 
 void setPageIconPos(int page) {
   switch(page) {
@@ -2013,7 +2092,6 @@ void draw_page() {
     
     configure_lcd();  
 
-
   switch(dispPage) {
     case 0: {
       // if there was an error, then clear whole screen, otherwise only graphic updated part
@@ -2330,7 +2408,8 @@ void draw_page() {
       draw_time(timeinfo, sensorDifMin);
       fetch_temperature_and_humidity(tmprc, humid);
       draw_temperature_and_humidity();
-      draw_clock(timeinfo, glColor);
+      //draw_clock(timeinfo, glColor);
+      drawAnalogClock(glColor);
     }
     break;
     
@@ -2787,71 +2866,6 @@ void displayCurrentTimeLCD() {
     }
 }
 
-class AnalogClock {
-    private:
-      unsigned long lastUpdate = 0;
-
-    int16_t cx, cy; // Center of the clock
-    struct tm localTimeInfo;
-    int lastMin = 61, lastSec = 61;
-    float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0; // Saved H, M, S x & y multipliers
-    int16_t osx = 0, osy = 0, omx = 0, omy = 0, ohx = 0, ohy = 0; // Previous H, M, S x & y coords.
-
-    float getRadians(float deg) {
-        return (deg - 90) * 0.0174532925;
-    }
-
-    void drawHand(float multiplier, int16_t length, uint16_t color, int16_t &ox, int16_t &oy) {
-        int16_t nx = multiplier * length + cx;
-        int16_t ny = multiplier * length + cy;
-        M5.Lcd.drawLine(cx, cy, ox, oy, TFT_BLACK);
-        M5.Lcd.drawLine(cx, cy, nx, ny, color);
-        ox = nx;
-        oy = ny;
-    }
-
-public:
-    AnalogClock(int16_t centerX, int16_t centerY) : cx(centerX), cy(centerY) {}
-
-    void draw() {
-        unsigned long currentMillis = millis();
-        if (currentMillis - lastUpdate < 1000) return;
-
-        if (dispPage != 2) return;
-        if (!getLocalTime(&localTimeInfo)) return;
-
-        uint8_t hh = localTimeInfo.tm_hour, mm = localTimeInfo.tm_min, ss = localTimeInfo.tm_sec;  // Get current time
-
-        // Pre-compute hand degrees
-        float sdeg = ss * 6; // 0-59 -> 0-354
-        float mdeg = mm * 6 + sdeg * 0.01666667; // 0-59 -> 0-360 - includes seconds
-        float hdeg = hh * 30 + mdeg * 0.0833333; // 0-11 -> 0-360 - includes minutes and seconds
-
-        hx = cos(getRadians(hdeg));
-        hy = sin(getRadians(hdeg));
-        mx = cos(getRadians(mdeg));
-        my = sin(getRadians(mdeg));
-        sx = cos(getRadians(sdeg));
-        sy = sin(getRadians(sdeg));
-
-        if (lastMin != mm || lastSec != ss) {
-            drawHand(hx, 52, TFT_WHITE, ohx, ohy);
-            drawHand(mx, 74, TFT_WHITE, omx, omy);
-            drawHand(sx, 78, TFT_RED, osx, osy);
-
-            M5.Lcd.fillCircle(cx, cy, 3, TFT_RED);
-            lastSec = ss;
-        }
-        lastUpdate = currentMillis;
-    }
-};
-
-AnalogClock analogClock(160, 110);
-
-void drawAnalogClock() {
-    analogClock.draw();
-}
-
 void processUDPPackets() {
     if (is_task_bootstrapping) {
         return;
@@ -2894,13 +2908,14 @@ void handleSnoozePacket(const char* packetBuffer) {
 
 void loop() {
   webServerProcessing();
-  
+
   if (!is_task_bootstrapping) {
+    AnalogClock analogClock(160, 110, TFT_WHITE);
     buttons_test();
     checkNightscoutUpdates();
     checkLoggedErrors();
     displayCurrentTimeLCD();
-    drawAnalogClock();
+    drawAnalogClock(glColor);
     processUDPPackets();
   }
   
