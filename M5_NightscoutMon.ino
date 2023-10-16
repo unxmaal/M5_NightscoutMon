@@ -2025,116 +2025,7 @@ void draw_temperature_and_humidity() {
       #endif
 }
 
-void draw_clock(struct tm timeinfo, uint16_t glColor) {
-  // draw clock
-      float sx = 0, sy = 1, mx = 1, my = 0, hx = -1, hy = 0;    // Saved H, M, S x & y multipliers
-      float sdeg=0, mdeg=0, hdeg=0;
-      uint16_t x0=0, x1=0, yy0=0, yy1=0;
-    
-      uint8_t hh=timeinfo.tm_hour, mm=timeinfo.tm_min, ss=timeinfo.tm_sec;  // Get current time
 
-      // Draw clock face
-      M5.Lcd.fillCircle(160, 110, 98, glColor);
-      M5.Lcd.fillCircle(160, 110, 92, TFT_BLACK);
-    
-      // Draw 12 lines
-      for(int i = 0; i<360; i+= 30) {
-        sx = cos((i-90)*0.0174532925);
-        sy = sin((i-90)*0.0174532925);
-        x0 = sx*94+160;
-        yy0 = sy*94+110;
-        x1 = sx*80+160;
-        yy1 = sy*80+110;
-    
-        M5.Lcd.drawLine(x0, yy0, x1, yy1, glColor);
-      }
-      
-      // Draw 60 dots
-      for(int i = 0; i<360; i+= 6) {
-        sx = cos((i-90)*0.0174532925);
-        sy = sin((i-90)*0.0174532925);
-        x0 = sx*82+160;
-        yy0 = sy*82+110;
-        // Draw minute markers
-        M5.Lcd.drawPixel(x0, yy0, TFT_WHITE);
-        
-        // Draw main quadrant dots
-        if(i==0 || i==180) M5.Lcd.fillCircle(x0, yy0, 2, TFT_WHITE);
-        if(i==90 || i==270) M5.Lcd.fillCircle(x0, yy0, 2, TFT_WHITE);
-      }
-    
-      M5.Lcd.fillCircle(160, 110, 3, TFT_WHITE);
-
-      // draw day
-      M5.Lcd.drawRoundRect(182, 97, 36, 26, 7, TFT_LIGHTGREY);
-      M5.Lcd.setTextDatum(MC_DATUM);
-      M5.Lcd.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-      M5.Lcd.setFreeFont(FSSB9);
-      M5.Lcd.drawString(String(timeinfo.tm_mday), 200, 108, GFXFF);
-    
-      // draw name
-      M5.Lcd.setTextDatum(MC_DATUM);
-      M5.Lcd.setFreeFont(FSSB9);
-      M5.Lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
-      M5.Lcd.drawString(cfg.userName, 160, 145, GFXFF);
-  
-      // Pre-compute hand degrees, x & y coords for a fast screen update
-      sdeg = ss*6;                  // 0-59 -> 0-354
-      mdeg = mm*6+sdeg*0.01666667;  // 0-59 -> 0-360 - includes seconds
-      hdeg = hh*30+mdeg*0.0833333;  // 0-11 -> 0-360 - includes minutes and seconds
-      hx = cos((hdeg-90)*0.0174532925);    
-      hy = sin((hdeg-90)*0.0174532925);
-      mx = cos((mdeg-90)*0.0174532925);    
-      my = sin((mdeg-90)*0.0174532925);
-      sx = cos((sdeg-90)*0.0174532925);    
-      sy = sin((sdeg-90)*0.0174532925);
-
-      if (ss==0 || initial) {
-        initial = 0;
-        // Erase hour and minute hand positions every minute
-        M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_BLACK);
-        M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_BLACK);
-        M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_BLACK);
-        M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_BLACK);
-        M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_BLACK);
-        ohx = hx*52+160;    
-        ohy = hy*52+110;
-        M5.Lcd.drawLine(omx, omy, 160, 110, TFT_BLACK);
-        omx = mx*74+160;    
-        omy = my*74+110;
-      }
-  
-      // Redraw new hand positions, hour and minute hands not erased here to avoid flicker
-      M5.Lcd.drawLine(osx, osy, 160, 110, TFT_BLACK);
-      osx = sx*78+160;    
-      osy = sy*78+110;
-      M5.Lcd.drawLine(ohx, ohy, 160, 110, TFT_WHITE);
-      M5.Lcd.drawLine(ohx+1, ohy, 161, 110, TFT_WHITE);
-      M5.Lcd.drawLine(ohx-1, ohy, 159, 110, TFT_WHITE);
-      M5.Lcd.drawLine(ohx, ohy-1, 160, 109, TFT_WHITE);
-      M5.Lcd.drawLine(ohx, ohy+1, 160, 111, TFT_WHITE);
-      M5.Lcd.drawLine(omx, omy, 160, 110, TFT_WHITE);
-      M5.Lcd.drawLine(osx, osy, 160, 110, TFT_RED);
-  
-      M5.Lcd.fillCircle(160, 110, 3, TFT_RED);      
-
-      // draw angle arrow  
-      int ay=0;
-      if(ns.arrowAngle>=45)
-        ay=4;
-      else
-        if(ns.arrowAngle>-45)
-          ay=18;
-        else
-          ay=30;
-      M5.Lcd.fillRect(262, 80, 58, 60, TFT_BLACK);
-      if(ns.arrowAngle!=180)
-        drawArrow(280, ay+90, 10, ns.arrowAngle+85, 28, 28, glColor);
-        
-      handleAlarmsInfoLine(&ns);
-      drawBatteryStatus(icon_xpos[2], icon_ypos[2]);
-      drawLogWarningIcon();
-}
 
 
 void draw_page() {
@@ -2460,7 +2351,6 @@ void draw_page() {
       draw_time(timeinfo, sensorDifMin);
       fetch_temperature_and_humidity(tmprc, humid);
       draw_temperature_and_humidity();
-      //draw_clock(timeinfo, glColor);
       drawAnalogClock(glColor);
     }
     break;
