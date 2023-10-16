@@ -836,29 +836,28 @@ void buttons_test() {
   }
 }
 
-
 const char * CONSONANTS = "bcdfghjklmnpqrstvwxyz";
 const char * VOWELS = "aeiouy";
-int passLen = 8;
+const int passLen = 8;
 
-void generate_ssid_passphrase (char * buffer) {
-  char passphrase[passLen+1];
-  int max_consonants;
-  int max_vowels;
-  max_consonants = strlen(CONSONANTS);
-  max_vowels = strlen(VOWELS);
-  randomSeed(analogRead(0));
-  passphrase[0] = CONSONANTS[random(0, max_consonants)];
-  passphrase[1] = VOWELS[random(0, max_vowels)];
-  passphrase[2] = VOWELS[random(0, max_vowels)];
-  passphrase[3] = CONSONANTS[random(0, max_consonants)];
-  passphrase[4] = VOWELS[random(0, max_vowels)];
-  passphrase[5] = VOWELS[random(0, max_vowels)];
-  passphrase[6] = CONSONANTS[random(0, max_consonants)];
-  passphrase[7] = VOWELS[random(0, max_vowels)];
-  passphrase[8] = VOWELS[random(0, max_vowels)];
-  passphrase[9] = '\0';
-  strcpy(buffer, passphrase);
+void generate_ssid_passphrase(char * buffer) {
+    const int max_consonants = strlen(CONSONANTS);
+    const int max_vowels = strlen(VOWELS);
+    char passphrase[passLen + 1];
+    
+    // Use a seed for the random generator based on an analog read
+    randomSeed(analogRead(0));
+    
+    for(int i = 0; i < passLen; i++) {
+        if(i % 2 == 0) { // Even index: Consonant
+            passphrase[i] = CONSONANTS[random(max_consonants)];
+        } else { // Odd index: Vowel
+            passphrase[i] = VOWELS[random(max_vowels)];
+        }
+    }
+    passphrase[passLen] = '\0'; // Null-terminate the passphrase
+    
+    strcpy(buffer, passphrase);
 }
 
 void wifi_connect() {
