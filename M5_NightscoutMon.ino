@@ -216,6 +216,15 @@ unsigned long lastNightscoutCheck = 0;
 unsigned long lastLoggedErrorsCheck = 0;
 uint16_t glColor = TFT_GREEN;
 
+const int GRAPH_LEFT = 231;
+const int GRAPH_RIGHT = 319;
+const int GRAPH_TOP = 113;
+const int GRAPH_BOTTOM = 203;
+const int GRAPH_WIDTH = GRAPH_RIGHT - GRAPH_LEFT;
+const int GRAPH_HEIGHT = GRAPH_BOTTOM - GRAPH_TOP;
+const float MAX_GLK = 12.0;
+const float MIN_GLK = 3.0;
+
 struct NSinfo ns;
 
 class AnalogClock {
@@ -1034,54 +1043,37 @@ void drawArrow(int x, int y, int asize, int aangle, int pwidth, int plength, uin
     }
 }
 
-
+uint16_t getColorForSgv(float sgv) {
+    if (sgv < cfg.red_low || sgv > cfg.red_high) {
+        return TFT_RED;
+    } else if (sgv < cfg.yellow_low || sgv > cfg.yellow_high) {
+        return TFT_YELLOW;
+    }
+    return TFT_GREEN;
+}
 
 void drawMiniGraph(struct NSinfo *ns){
-  /*
-  // draw help lines
-  for(int i=0; i<320; i+=40) {
-    M5.Lcd.drawLine(i, 0, i, 240, TFT_DARKGREY);
-  }
-  for(int i=0; i<240; i+=30) {
-    M5.Lcd.drawLine(0, i, 320, i, TFT_DARKGREY);
-  }
-  M5.Lcd.drawLine(0, 120, 320, 120, TFT_LIGHTGREY);
-  M5.Lcd.drawLine(160, 0, 160, 240, TFT_LIGHTGREY);
-  */
-  int i;
-  float glk;
-  uint16_t sgvColor;
-  // M5.Lcd.drawLine(231, 110, 319, 110, TFT_DARKGREY);
-  // M5.Lcd.drawLine(231, 110, 231, 207, TFT_DARKGREY);
-  // M5.Lcd.drawLine(231, 207, 319, 207, TFT_DARKGREY);
-  // M5.Lcd.drawLine(319, 110, 319, 207, TFT_DARKGREY);
-  M5.Lcd.drawLine(231, 113, 319, 113, TFT_LIGHTGREY);
-  M5.Lcd.drawLine(231, 203, 319, 203, TFT_LIGHTGREY);
-  M5.Lcd.drawLine(231, 200-(4-3)*10+3, 319, 200-(4-3)*10+3, TFT_LIGHTGREY);
-  M5.Lcd.drawLine(231, 200-(9-3)*10+3, 319, 200-(9-3)*10+3, TFT_LIGHTGREY);
-  Serial.print("Last 10 values: ");
-  for(i=9; i>=0; i--) {
-    sgvColor = TFT_GREEN;
-    glk = *(ns->last10sgv+9-i);
-    if(glk>12) {
-      glk = 12;
-    } else {
-      if(glk<3) {
-        glk = 3;
-      }
+    // Draw horizontal equidistant grid lines
+    for(int y = GRAPH_TOP; y <= GRAPH_BOTTOM; y += GRAPH_HEIGHT / 4) {
+        M5.Lcd.drawLine(GRAPH_LEFT, y, GRAPH_RIGHT, y, TFT_LIGHTGREY);
     }
-    if(glk<cfg.red_low || glk>cfg.red_high) {
-      sgvColor = TFT_RED;
-    } else {
-      if(glk<cfg.yellow_low || glk>cfg.yellow_high) {
-        sgvColor = TFT_YELLOW;
-      }
+
+    // Print last 10 values and draw data points
+    Serial.print("Last 10 values: ");
+    for(int i = 9; i >= 0; i--) {
+        float sgvValue = *(ns->last10sgv + 9 - i);
+        sgvValue = constrain(sgvValue, MIN_GLK, MAX_GLK); // Ensure value is between MIN and MAX
+
+        uint16_t sgvColor = getColorForSgv(sgvValue);
+        Serial.print(*(ns->last10sgv+i)); Serial.print(" ");
+
+        if(sgvValue != 0) {
+            int plotX = GRAPH_LEFT + 3 + i * 9;
+            int plotY = GRAPH_BOTTOM - (sgvValue - MIN_GLK) * 10.0;
+            M5.Lcd.fillCircle(plotX, plotY, 3, sgvColor);
+        }
     }
-    Serial.print(*(ns->last10sgv+i)); Serial.print(" ");
-    if(*(ns->last10sgv+9-i)!=0)
-      M5.Lcd.fillCircle(234+i*9, 203-(glk-3.0)*10.0, 3, sgvColor);
-  }
-  Serial.println();
+    Serial.println();
 }
 
 int readNightscout(char *url, char *token, struct NSinfo *ns) {
@@ -1847,21 +1839,6 @@ void drawLogWarningIcon() {
       drawIcon(icon_xpos[0], icon_ypos[0], (uint8_t*)warning_icon16x16, TFT_LIGHTGREY);
     else
       M5.Lcd.fillRect(icon_xpos[0], icon_ypos[0], 16, 16, BLACK);
-}
-
-void drawSegment(int x, int y, int r1, int r2, float a, int col)
-{
-  a = (a / 57.2958) - 1.57; 
-  float a1 = a-1.57,
-      a2 = a+1.57,
-      x1 = x + (cos(a1) * r1),
-      y1 = y + (sin(a1) * r1),
-      x2 = x + (cos(a2) * r1),
-      y2 = y + (sin(a2) * r1),
-      x3 = x + (cos(a) * r2),
-      y3 = y + (sin(a) * r2);
-      
-  M5.Lcd.fillTriangle(x1,y1,x2,y2,x3,y3,col);
 }
 
 //--------------
