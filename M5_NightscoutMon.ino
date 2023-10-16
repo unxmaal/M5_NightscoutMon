@@ -347,7 +347,6 @@ void drawAnalogClock(uint16_t mycolor) {
             startup = false;
         }
         
-
         if (currentMillis - lastUpdateMillis >= updateInterval) {
           lastUpdateMillis = currentMillis;
 
@@ -357,6 +356,8 @@ void drawAnalogClock(uint16_t mycolor) {
           drawBatteryStatus(icon_xpos[2], icon_ypos[2]);
           drawLogWarningIcon();
         }
+    } else {
+      startup = true;  //this forces a redraw of the clock face after a page change
     }
 }
 
