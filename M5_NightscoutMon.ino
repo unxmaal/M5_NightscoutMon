@@ -992,30 +992,49 @@ int8_t getBatteryLevel()
   return -1;
 }
 
-void drawArrow(int x, int y, int asize, int aangle, int pwidth, int plength, uint16_t color){
-  float dx = (asize-10)*cos(aangle-90)*PI/180+x; // calculate X position  
-  float dy = (asize-10)*sin(aangle-90)*PI/180+y; // calculate Y position  
-  float x1 = 0;         float y1 = plength;
-  float x2 = pwidth/2;  float y2 = pwidth/2;
-  float x3 = -pwidth/2; float y3 = pwidth/2;
-  float angle = aangle*PI/180-135;
-  float xx1 = x1*cos(angle)-y1*sin(angle)+dx;
-  float yy1 = y1*cos(angle)+x1*sin(angle)+dy;
-  float xx2 = x2*cos(angle)-y2*sin(angle)+dx;
-  float yy2 = y2*cos(angle)+x2*sin(angle)+dy;
-  float xx3 = x3*cos(angle)-y3*sin(angle)+dx;
-  float yy3 = y3*cos(angle)+x3*sin(angle)+dy;
-  M5.Lcd.fillTriangle(xx1,yy1,xx3,yy3,xx2,yy2, color);
-  M5.Lcd.drawLine(x, y, xx1, yy1, color);
-  M5.Lcd.drawLine(x+1, y, xx1+1, yy1, color);
-  M5.Lcd.drawLine(x, y+1, xx1, yy1+1, color);
-  M5.Lcd.drawLine(x-1, y, xx1-1, yy1, color);
-  M5.Lcd.drawLine(x, y-1, xx1, yy1-1, color);
-  M5.Lcd.drawLine(x+2, y, xx1+2, yy1, color);
-  M5.Lcd.drawLine(x, y+2, xx1, yy1+2, color);
-  M5.Lcd.drawLine(x-2, y, xx1-2, yy1, color);
-  M5.Lcd.drawLine(x, y-2, xx1, yy1-2, color);
+void drawArrow(int x, int y, int asize, int aangle, int pwidth, int plength, uint16_t color) {
+    // Inline lambda to rotate a point around the origin
+    auto rotate = [](float px, float py, float angle) -> std::pair<float, float> {
+        return {
+            px * cos(angle) - py * sin(angle),
+            py * cos(angle) + px * sin(angle)
+        };
+    };
+    
+    // Adjust the angle (convert to radians and offset by 135 degrees)
+    float angle = (aangle - 135) * PI / 180;
+    
+    // Compute the arrow tip coordinates
+    float dx = (asize - 10) * cos((aangle - 90) * PI / 180) + x;
+    float dy = (asize - 10) * sin((aangle - 90) * PI / 180) + y;
+    
+    // Points for the arrowhead triangle (pre-rotation)
+    float x1 = 0, y1 = plength;
+    float x2 = pwidth / 2, y2 = pwidth / 2;
+    float x3 = -pwidth / 2, y3 = pwidth / 2;
+    
+    // Rotate the triangle points
+    auto [xx1, yy1] = rotate(x1, y1, angle);
+    auto [xx2, yy2] = rotate(x2, y2, angle);
+    auto [xx3, yy3] = rotate(x3, y3, angle);
+    
+    // Translate the rotated points to the arrow tip position
+    xx1 += dx; yy1 += dy;
+    xx2 += dx; yy2 += dy;
+    xx3 += dx; yy3 += dy;
+    
+    // Draw the arrowhead
+    M5.Lcd.fillTriangle(xx1, yy1, xx3, yy3, xx2, yy2, color);
+    
+    // Draw the main shaft of the arrow with varying thickness
+    for (int i = -2; i <= 2; ++i) {
+        for (int j = -2; j <= 2; ++j) {
+            M5.Lcd.drawLine(x + i, y + j, xx1 + i, yy1 + j, color);
+        }
+    }
 }
+
+
 
 void drawMiniGraph(struct NSinfo *ns){
   /*
@@ -2037,6 +2056,18 @@ void draw_page() {
 
   switch(dispPage) {
     case 0: {
+      // ----------------------------------------
+      // |datetimeStr   ⚡(Battery)    LWI       |
+      // |                        sensorDifMin  |
+      // |Username                              |
+      // |                                      |
+      // |I(??)                                 |
+      // |C(??)                                 |
+      // |                                      |
+      // | (BIG delta)          MiniGraph       |
+      // | SGV Number + Arrow                   |
+      // |--------------------------------------|
+
       // if there was an error, then clear whole screen, otherwise only graphic updated part
       // M5.Lcd.fillScreen(BLACK);
       // M5.Lcd.fillRect(230, 110, 90, 100, TFT_BLACK);
