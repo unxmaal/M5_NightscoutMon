@@ -1906,7 +1906,7 @@ int calculate_sensor_time_difference(struct tm timeinfo) {
         tdColor = TFT_RED;
       }
     }
-    return sensorDifSec;
+    return sensorDifMin;
 }
 
 
@@ -2341,10 +2341,12 @@ void draw_page() {
       uint16_t glColor = calculate_sgv_color();
       draw_sgv(glColor);
       draw_delta();
-      int sensorDifMin = calculate_sensor_time_difference(timeinfo);
-      draw_time(timeinfo, sensorDifMin);
-      fetch_temperature_and_humidity(tmprc, humid);
-      draw_temperature_and_humidity();
+      int timeDiff = calculate_sensor_time_difference(timeinfo);
+      draw_time(timeinfo, timeDiff);
+      #ifndef ARDUINO_M5STACK_Core2
+        fetch_temperature_and_humidity(tmprc, humid);
+        draw_temperature_and_humidity();
+      #endif
       drawAnalogClock(glColor);
     }
     break;
