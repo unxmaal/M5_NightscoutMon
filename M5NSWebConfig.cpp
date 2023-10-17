@@ -933,7 +933,7 @@ void handleSaveConfig() {
   message += "<body>\r\n";
   message += "<h1>M5Stack Nightscout monitor for "; message += cfg.userName; message += "!</h1>\r\n";
   message += "<p>Saving configuration to M5NS.INI file.</p>\r\n";
-  message += "<p>Backup copy of current M5NS.INI should be blaced in M5NS.BAK file.</p>\r\n";
+  message += "<p>Backup copy of current M5NS.INI should be placed in M5NS.BAK file.</p>\r\n";
   message += "</body>\r\n";
   message += "</html>\r\n";
   
