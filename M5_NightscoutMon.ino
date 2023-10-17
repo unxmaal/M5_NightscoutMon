@@ -33,48 +33,47 @@
 // M5Stack Arduino / M5Stack-Core-ESP32
 // M5Stack Arduino / M5Stack-Core2
 
+// Includes
+#include "DHT12.h"
+#include "externs.h"
+#include "Free_Fonts.h"
+#include "IniFile.h"
+#include "M5NSconfig.h"
+#include "M5NSWebConfig.h"
+#include "microdot.h"
+#include "SHT3X.h"
+#include "soc/rtc_io_reg.h"
+#include "time.h"
+#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
+#include <ArduinoJson.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+#include <Preferences.h>
+#include <WebServer.h>
+#include <WiFi.h>
+#include <WiFiMulti.h>
+#include <WiFiUdp.h>
+#include <Wire.h>     //The DHT12 uses I2C comunication.
+// #include <util/eu_dst.h>
+
 #ifdef ARDUINO_M5STACK_Core2
   #include <M5Core2.h>
   #include <driver/i2s.h>
 #else
   #include <M5Stack.h>
 #endif
-#include <Preferences.h>
-#include <WiFi.h>
-#include <WiFiMulti.h>
-#include <WiFiUdp.h>
-#include <WebServer.h>
-#include <ESPmDNS.h>
-#include <DNSServer.h>
-#include <HTTPClient.h>
-#include <HTTPUpdate.h>
-#include "time.h"
-#include "externs.h"
-// #include <util/eu_dst.h>
+
+// Defines
 #define ARDUINOJSON_USE_LONG_LONG 1
-#include <ArduinoJson.h>
-#include "soc/rtc_io_reg.h"
-
-#include <Adafruit_NeoPixel.h>
-Adafruit_NeoPixel pixels(10, 15, NEO_GRB + NEO_KHZ800);
-
-#include "Free_Fonts.h"
-#include "IniFile.h"
-#include "M5NSconfig.h"
-#include "M5NSWebConfig.h"
-
-#include <Wire.h>     //The DHT12 uses I2C comunication.
-#include "DHT12.h"
-DHT12 dht12;
-
-#include "SHT3X.h"
-SHT3X sht30;
-
-#include "microdot.h"
-MicroDot MD;
-
-String M5NSversion("2022100201");
+#define VIBfreq 10000
+#define VIBchannel 14
+#define VIBresolution 10
+#define UDP_TX_PACKET_MAX_SIZE 2048
+#define UDP_SEND_RETRIES 3
+#define MAX_PAGE 3
 
 #ifdef ARDUINO_M5STACK_Core2
   #define CONFIG_I2S_BCK_PIN 12
@@ -85,39 +84,73 @@ String M5NSversion("2022100201");
   #define MODE_SPK 1
 #endif
 
-#define VIBfreq 10000
-#define VIBchannel 14
-#define VIBresolution 10
+#ifndef min
+  #define min(a,b) (((a) < (b)) ? (a) : (b))
+#endif
 
-// The UDP library class
-WiFiUDP udp;
-#define UDP_TX_PACKET_MAX_SIZE 2048
-#define UDP_SEND_RETRIES 3
-// IP address to send UDP data to
-// const char * udpAddress = "192.168.1.255";
-const int udpPort = 50555;
+#ifndef M_PI
+    #define M_PI 3.14159265358979323846
+#endif
 
-// buffers for receiving and sending UDP data
+// Globals
+bool is_task_bootstrapping = 0;
+boolean initial = 1;
+boolean mDNSactive = false;
+char localTimeStr[30];
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE];  //buffer to hold incoming packet,
-
-// extern const unsigned char alarmSndData[];
-extern const unsigned char sun_icon16x16[];
-extern const unsigned char clock_icon16x16[];
-extern const unsigned char timer_icon16x16[];
-// extern const unsigned char powerbutton_icon16x16[];
-extern const unsigned char door_icon16x16[];
-extern const unsigned char warning_icon16x16[];
-extern const unsigned char wifi1_icon16x16[];
-extern const unsigned char wifi2_icon16x16[];
+const byte DNS_PORT = 53;
+const char iniFilename[] = "/M5NS.INI";
+const char* ntpServer = "pool.ntp.org"; // "time.nist.gov", "time.google.com"
+const float MAX_GLK = 12.0;
+const float MIN_GLK = 3.0;
+const int GRAPH_BOTTOM = 203;
+const int GRAPH_LEFT = 231;
+const int GRAPH_RIGHT = 319;
+const int GRAPH_TOP = 113;
+const int GRAPH_HEIGHT = GRAPH_BOTTOM - GRAPH_TOP;
+const int GRAPH_WIDTH = GRAPH_RIGHT - GRAPH_LEFT;
+const int udpPort = 50555;
 extern const unsigned char bat0_icon16x16[];
 extern const unsigned char bat1_icon16x16[];
 extern const unsigned char bat2_icon16x16[];
 extern const unsigned char bat3_icon16x16[];
 extern const unsigned char bat4_icon16x16[];
+extern const unsigned char clock_icon16x16[];
+extern const unsigned char door_icon16x16[];
 extern const unsigned char plug_icon16x16[];
-
-Preferences preferences;
-tConfig cfg;
+extern const unsigned char sun_icon16x16[];
+extern const unsigned char timer_icon16x16[];
+extern const unsigned char warning_icon16x16[];
+extern const unsigned char wifi1_icon16x16[];
+extern const unsigned char wifi2_icon16x16[];
+int dispPage = 0;
+int err_log_count = 0;
+int err_log_ptr = 0;
+int icon_xpos[3] = {144, 144+18, 144+2*18}; // icon positions for the first page - WiFi/log, Snooze, Battery
+int icon_ypos[3] = {0, 0, 0};
+int lastMin = 61;
+int lastSec = 61;
+int MAX_TIME_RETRY = 30;
+int maxPage = MAX_PAGE;
+int rcnt = 4;
+int snoozeMult = 0;
+int udpSendSnoozeRetries = 0;
+static boolean startup = true;
+time_t lastAlarmTime = 0;
+time_t snoozeUntil = 0;
+uint16_t glColor = TFT_GREEN;
+uint16_t osx=120, osy=120, omx=120, omy=120, ohx=120, ohy=120;  // Saved H, M, S x & y coords
+uint8_t lcdBrightness = 10;
+unsigned long lastButtonMillis = 0;
+unsigned long lastLoggedErrorsCheck = 0;
+unsigned long lastNightscoutCheck = 0;
+unsigned long lastWebServerCheck = 0;
+unsigned long msCount;
+unsigned long msStart;
+// const char * udpAddress = "192.168.1.255";
+// extern const unsigned char alarmSndData[];
+// extern const unsigned char powerbutton_icon16x16[];
+// unsigned long msCountLog;
 
 // Starfield Services Root Certificate Authority - G2
 // Valid till Dec 31 23:59:59 2037 GMT
@@ -147,86 +180,35 @@ const char* rootCACertificate = \
 "sSi6" \
 "-----END CERTIFICATE-----\n";
 
-WebServer w3srv(80);
-const byte DNS_PORT = 53;
-DNSServer dnsServer;
-
-const char* ntpServer = "pool.ntp.org"; // "time.nist.gov", "time.google.com"
-struct tm localTimeInfo;
-int MAX_TIME_RETRY = 30;
-int lastSec = 61;
-int lastMin = 61;
-char localTimeStr[30];
-
-struct err_log_item {
-  struct tm err_time;
-  int err_code;
-} err_log[10];
-int err_log_ptr = 0;
-int err_log_count = 0;
-int rcnt = 4;
-
-int dispPage = 0;
-#define MAX_PAGE 3
-int maxPage = MAX_PAGE;
-
-// icon positions for the first page - WiFi/log, Snooze, Battery
-int icon_xpos[3] = {144, 144+18, 144+2*18};
-int icon_ypos[3] = {0, 0, 0};
-
-// analog clock global variables
-uint16_t osx=120, osy=120, omx=120, omy=120, ohx=120, ohy=120;  // Saved H, M, S x & y coords
-boolean initial = 1;
-boolean mDNSactive = false;
-static boolean startup = true;
-
-
-#ifndef min
-  #define min(a,b) (((a) < (b)) ? (a) : (b))
-#endif
-
-#ifndef M_PI
-    #define M_PI 3.14159265358979323846
-#endif
-
-WiFiMulti WiFiMultiple;
-
-unsigned long msCount;
-// unsigned long msCountLog;
-unsigned long msStart;
-uint8_t lcdBrightness = 10;
-const char iniFilename[] = "/M5NS.INI";
-
-DynamicJsonDocument JSONdoc(16384);
-time_t lastAlarmTime = 0;
-time_t snoozeUntil = 0;
-int snoozeMult = 0;
-unsigned long lastButtonMillis = 0;
-int udpSendSnoozeRetries = 0;
-bool is_task_bootstrapping = 0;
-
 #ifdef ARDUINO_M5STACK_Core2
   static int16_t music_data[25000]; // 2s in sample rate 11025 samp/s
 #else
   static uint8_t music_data[25000]; // 5s in sample rate 5000 samp/s
 #endif
 
-unsigned long lastWebServerCheck = 0;
-unsigned long lastNightscoutCheck = 0;
-unsigned long lastLoggedErrorsCheck = 0;
-uint16_t glColor = TFT_GREEN;
-
-const int GRAPH_LEFT = 231;
-const int GRAPH_RIGHT = 319;
-const int GRAPH_TOP = 113;
-const int GRAPH_BOTTOM = 203;
-const int GRAPH_WIDTH = GRAPH_RIGHT - GRAPH_LEFT;
-const int GRAPH_HEIGHT = GRAPH_BOTTOM - GRAPH_TOP;
-const float MAX_GLK = 12.0;
-const float MIN_GLK = 3.0;
-
+// Type Definitions and Structs
+struct err_log_item {
+  struct tm err_time;
+  int err_code;
+} err_log[10];
 struct NSinfo ns;
+struct tm localTimeInfo;
 
+// Classes
+Adafruit_NeoPixel pixels(10, 15, NEO_GRB + NEO_KHZ800);
+DHT12 dht12;
+DNSServer dnsServer;
+DynamicJsonDocument JSONdoc(16384);
+MicroDot MD;
+Preferences preferences;
+SHT3X sht30;
+String M5NSversion("2022100201");
+tConfig cfg;
+WebServer w3srv(80);
+WiFiMulti WiFiMultiple;
+WiFiUDP udp;
+
+// Main
 class AnalogClock {
     private:
       unsigned long lastUpdate = 0;
@@ -334,8 +316,7 @@ public:
 
 AnalogClock analogClock(160, 110, TFT_WHITE);
 
-void drawAnalogClock(uint16_t mycolor) {
-    
+void drawAnalogClock(uint16_t mycolor) { 
     static unsigned long lastUpdateMillis = 0;
     const unsigned long updateInterval = 1000;
 
