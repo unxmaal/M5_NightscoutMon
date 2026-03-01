@@ -256,7 +256,7 @@ def search_knowledge(query: str) -> str:
 
     # Search knowledge FTS
     rows = db.execute(
-        "SELECT k.id, k.topic, k.summary, k.detail, k.tags "
+        "SELECT k.id, k.topic, k.summary, k.detail, k.tags, k.source "
         "FROM knowledge_fts f JOIN knowledge k ON f.rowid = k.id "
         "WHERE knowledge_fts MATCH ? ORDER BY rank LIMIT 10",
         (fts_query,),
@@ -266,11 +266,21 @@ def search_knowledge(query: str) -> str:
             "UPDATE knowledge SET hit_count = hit_count + 1 WHERE id = ?",
             (r["id"],),
         )
-        results.append(
-            f"[KNOWLEDGE] {r['topic']}: {r['summary']}"
-            + (f"\n  Detail: {r['detail']}" if r["detail"] else "")
-            + (f"\n  Tags: {r['tags']}" if r["tags"] else "")
-        )
+        tags = r["tags"] or ""
+        if "rules, pointer" in tags:
+            # Extract filename from source field
+            src = r["source"] or ""
+            fname = src.replace("rules/", "") if src.startswith("rules/") else src
+            results.append(
+                f'[RULE] {src} — matches "{r["topic"]}". '
+                f'Read with get_rule("{fname}")'
+            )
+        else:
+            results.append(
+                f"[KNOWLEDGE] {r['topic']}: {r['summary']}"
+                + (f"\n  Detail: {r['detail']}" if r["detail"] else "")
+                + (f"\n  Tags: {tags}" if tags else "")
+            )
 
     # Search negative knowledge FTS
     rows = db.execute(
@@ -516,6 +526,80 @@ def get_notes(topic: str = "", limit: int = 10) -> str:
         f"[{r['created_at']}] {r['topic']}: {r['content']}" for r in rows
     ]
     return with_nudge("\n".join(lines), topic=topic or None)
+
+
+import re
+
+
+@mcp.tool()
+def save_rule(filename: str, content: str, search_terms: str) -> str:
+    """Write a rules file and auto-generate knowledge DB pointers.
+
+    Writes rules/<filename>, extracts ## headings, deletes stale DB entries,
+    and creates a pointer for each search term + heading. Idempotent.
+
+    Resets the behavioral store counter.
+    """
+    tracker.record_call("save_rule", topic=filename)
+    tracker.record_store()
+
+    # 1. Write the file
+    rules_dir = PROJECT_ROOT / "rules"
+    rules_dir.mkdir(parents=True, exist_ok=True)
+    file_path = rules_dir / filename
+    file_path.write_text(content, encoding="utf-8")
+    source = f"rules/{filename}"
+
+    # 2. Extract ## headings
+    headings = re.findall(r"^## (.+)$", content, re.MULTILINE)
+
+    # 3. Delete existing pointers for this source (idempotent)
+    db = get_db()
+    db.execute("DELETE FROM knowledge WHERE source = ?", (source,))
+
+    # 4. Insert pointer for each search term
+    terms = [t.strip() for t in search_terms.split(",") if t.strip()]
+    for term in terms:
+        db.execute(
+            "INSERT INTO knowledge (topic, summary, source, tags) "
+            "VALUES (?, ?, ?, ?)",
+            (term, f"See {source}", source, "rules, pointer"),
+        )
+
+    # 5. Insert pointer for each heading
+    for heading in headings:
+        db.execute(
+            "INSERT INTO knowledge (topic, summary, source, tags) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                heading,
+                f"Documented in {source} § {heading}",
+                source,
+                "rules, pointer, section",
+            ),
+        )
+
+    db.commit()
+    total = len(terms) + len(headings)
+    log(f"save_rule: {source} — {total} pointers ({len(terms)} terms, {len(headings)} headings)")
+    return with_nudge(
+        f"Saved {source}\n"
+        f"Pointers created: {total} ({len(terms)} search terms + {len(headings)} headings)\n"
+        f"Sections found: {headings if headings else '(none)'}"
+    )
+
+
+@mcp.tool()
+def get_rule(filename: str) -> str:
+    """Read and return the content of a rules file.
+
+    Pass just the filename (e.g., '09-testing.md'), not the full path.
+    """
+    tracker.record_call("get_rule", topic=filename)
+    file_path = PROJECT_ROOT / "rules" / filename
+    if not file_path.exists():
+        return with_nudge(f"Rule file not found: rules/{filename}")
+    return with_nudge(file_path.read_text(encoding="utf-8"))
 
 
 # --- Entry point ---

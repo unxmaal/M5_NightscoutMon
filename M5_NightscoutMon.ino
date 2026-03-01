@@ -1,6 +1,7 @@
 /*  M5Stack Nightscout monitor
     Copyright (C) 2018-2021 Martin Lukasek <martin@lukasek.cz>
-    
+    Copyright (C) 2024-2026 Eric Dodd <eric.e.dodd@gmail.com> — fork modifications
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
@@ -62,6 +63,7 @@ Adafruit_NeoPixel pixels(10, 15, NEO_GRB + NEO_KHZ800);
 #include "Free_Fonts.h"
 #include "IniFile.h"
 #include "M5NSconfig.h"
+#include "ns_pure_logic.h"
 #include "M5NSWebConfig.h"
 
 #include <Wire.h>     //The DHT12 uses I2C comunication.
@@ -278,29 +280,7 @@ void addErrorLog(int code){
   err_log_count++;
 }
 
-uint16_t crc16_update(uint16_t crc, uint8_t a)
-{
-  int i;
-  crc ^= a;
-  for (i = 0; i < 8; ++i)
-  {
-    if (crc & 1)
-    crc = (crc >> 1) ^ 0xA001;
-    else
-    crc = (crc >> 1);
-  }
-  return crc;
-}
-
-uint16_t calcCRC(char* str)
-{
-  uint16_t crc=0; // starting value as you like, must be the same before each calculation
-  for (int i=0;i<strlen(str);i++) // for each character in the string
-  {
-    crc= crc16_update (crc, str[i]); // update the crc value
-  }
-  return crc;
-}
+// crc16_update() and calcCRC() moved to lib/ns_pure_logic/ns_pure_logic.cpp
 
 void startupLogo() {
     // static uint8_t brightness, pre_brightness;
@@ -1024,38 +1004,14 @@ int readNightscout(char *url, char *token, struct NSinfo *ns) {
       if(httpCode == HTTP_CODE_OK) {
         String json = http.getString();
         Serial.printf("GET() response JSON length = %d\r\n", json.length());
-        // remove any non text characters (just for sure)
-        for(int i=0; i<json.length(); i++) {
-          // Serial.print(json.charAt(i), DEC); Serial.print(" = "); Serial.println(json.charAt(i));
-          if(json.charAt(i)<32 /* || json.charAt(i)=='\\' */) {
-            json.setCharAt(i, 32);
-          }
-        }
-        // json.replace("\\n"," ");
-        // invalid Unicode character defined by Ascensia Diabetes Care Bluetooth Glucose Meter or Medtronic
-        // ArduinoJSON does not accept any unicode surrogate pairs like \u0032 or \u0000
-        json.replace("\\u0000"," ");
-        json.replace("\\u000b"," ");
-        json.replace("\\u0032"," ");
-        // Serial.println(json);
-        // const size_t capacity = JSON_ARRAY_SIZE(10) + 10*JSON_OBJECT_SIZE(19) + 3840;
-        // Serial.print("JSON size needed= "); Serial.print(capacity); 
-        int ndx=0;
-        int sr=json.indexOf("\"date\":", ndx);
-        while(sr!=-1) {
-          ndx=sr+1;
-          if(sr+20<json.length()) {
-            // Serial.printf("Found date at position %d with char '%c' at +20\r\n", sr, json.charAt(sr+20));
-            if(json.charAt(sr+20)=='.') {
-              Serial.printf("Deleting at postion %d char '%c'\r\n", sr+20, json.charAt(sr+20));
-              json.remove(sr+20,1);
-              while(sr+20<json.length() && json.charAt(sr+20)>='0' && json.charAt(sr+20)<='9') {
-                Serial.printf("Cyclus deleting at postition %d char '%c'\r\n", sr+20, json.charAt(sr+20));
-                json.remove(sr+20,1);
-              }
-            }
-          }
-          sr=json.indexOf("\"date\":", ndx);
+        // Sanitize JSON: control chars, bad unicode escapes, date fractional ms
+        {
+          size_t jsonLen = json.length();
+          char* jsonBuf = new char[jsonLen + 1];
+          json.toCharArray(jsonBuf, jsonLen + 1);
+          jsonLen = sanitizeJson(jsonBuf, jsonLen);
+          json = String(jsonBuf);
+          delete[] jsonBuf;
         }
         // Serial.println(json);
         Serial.print("Free Heap = "); Serial.println(ESP.getFreeHeap());
@@ -1152,33 +1108,7 @@ int readNightscout(char *url, char *token, struct NSinfo *ns) {
           
           localtime_r(&ns->sensTime, &ns->sensTm);
           
-          ns->arrowAngle = 180;
-          if(strcmp(ns->sensDir,"DoubleDown")==0 || strcmp(ns->sensDir,"DOUBLE_DOWN")==0)
-            ns->arrowAngle = 90;
-          else 
-            if(strcmp(ns->sensDir,"SingleDown")==0 || strcmp(ns->sensDir,"SINGLE_DOWN")==0)
-              ns->arrowAngle = 75;
-            else 
-                if(strcmp(ns->sensDir,"FortyFiveDown")==0 || strcmp(ns->sensDir,"FORTY_FIVE_DOWN")==0)
-                  ns->arrowAngle = 45;
-                else 
-                    if(strcmp(ns->sensDir,"Flat")==0 || strcmp(ns->sensDir,"FLAT")==0)
-                      ns->arrowAngle = 0;
-                    else 
-                        if(strcmp(ns->sensDir,"FortyFiveUp")==0 || strcmp(ns->sensDir,"FORTY_FIVE_UP")==0)
-                          ns->arrowAngle = -45;
-                        else 
-                            if(strcmp(ns->sensDir,"SingleUp")==0 || strcmp(ns->sensDir,"SINGLE_UP")==0)
-                              ns->arrowAngle = -75;
-                            else 
-                                if(strcmp(ns->sensDir,"DoubleUp")==0 || strcmp(ns->sensDir,"DOUBLE_UP")==0)
-                                  ns->arrowAngle = -90;
-                                else 
-                                    if(strcmp(ns->sensDir,"NONE")==0)
-                                      ns->arrowAngle = 180;
-                                    else 
-                                        if(strcmp(ns->sensDir,"NOT COMPUTABLE")==0)
-                                          ns->arrowAngle = 180;
+          ns->arrowAngle = directionToAngle(ns->sensDir);
                                           
           Serial.print("sensDev = ");
           Serial.println(ns->sensDev);
@@ -2876,9 +2806,7 @@ void processUDPPackets() {
     }
 }
 
-bool isValidSnoozePacket(const char* packetBuffer) {
-    return strncmp(packetBuffer, "M5_Nightscout SNOOZE: USR=", 26) == 0;
-}
+// isValidSnoozePacket() moved to lib/ns_pure_logic/ns_pure_logic.cpp
 
 void handleSnoozePacket(const char* packetBuffer) {
     int urlCRC = calcCRC(cfg.url);
