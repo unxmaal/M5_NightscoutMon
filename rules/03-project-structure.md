@@ -19,6 +19,17 @@ SD/M5NS.INI             — Example INI config file for SD card
 Binaries/               — Pre-built firmware binaries
 PlatformIO/             — Archived PlatformIO project (2020, not current)
 Stand/                  — 3D printable STL files
+platformio.ini          — PlatformIO build config (ESP32 + native test envs)
+lib/ns_pure_logic/      — Hardware-free pure logic (testable on host)
+  ns_pure_logic.h       — Declarations (extern "C", standard C types only)
+  ns_pure_logic.cpp     — Implementations
+test/native/            — Native Unity test suites (one subdirectory per suite)
+  test_crc/             — CRC-16 tests
+  test_direction/       — Direction-to-angle mapping tests
+  test_snooze/          — Snooze packet parsing tests
+  test_json_sanitize/   — JSON sanitization tests
+  test_inifile_pure/    — INI helper function tests
+rules/                  — Project rules for Claude sessions
 ```
 
 ## Build System
@@ -26,7 +37,8 @@ Stand/                  — 3D printable STL files
 **Primary:** Arduino IDE with M5Stack board package.
 **Board URL:** `https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/arduino/package_m5stack_index.json`
 
-There is NO `platformio.ini` at the root. The PlatformIO zip in `PlatformIO/` is a 2020 snapshot and not the active build path.
+**Testing:** PlatformIO with native env for host-side unit tests.
+See `rules/09-testing.md` for test architecture, TDD workflow, and gotchas.
 
 ## Key Dependencies
 
@@ -40,4 +52,8 @@ There is NO `platformio.ini` at the root. The PlatformIO zip in `PlatformIO/` is
 
 ## Adding New Files
 
-If you add a `.cpp` file, it will be compiled automatically by Arduino IDE. If it needs access to globals, include `"externs.h"`. If new externs are needed, declare them in `externs.h`.
+If you add a `.cpp` file at the root, it will be compiled automatically by Arduino IDE. If it needs access to globals, include `"externs.h"`. If new externs are needed, declare them in `externs.h`.
+
+**Pure logic** (no Arduino/hardware deps) goes in `lib/ns_pure_logic/`. This is auto-discovered by PlatformIO for both ESP32 and native test builds. See `rules/09-testing.md`.
+
+**Test suites** go in `test/native/<suite_name>/<suite_name>.cpp`. Each suite must be in its own subdirectory — PlatformIO will not find flat `.cpp` files.

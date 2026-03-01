@@ -19,4 +19,6 @@ The MCP knowledge database (`.claude/knowledge.db`) exists for **persistent inte
 
 - Use the next available number prefix: `NN-short-name.md`
 - Keep rules concise and actionable — no essays.
-- Add a knowledge DB entry pointing to the new file.
+- Use `save_rule("NN-name.md", content, "term1, term2, ...")` to write the file and auto-generate all DB pointers in one call. This replaces the old manual workflow of writing the file + calling `add_knowledge()` multiple times.
+- To re-save a rule (e.g., after edits), just call `save_rule()` again — it deletes stale pointers before creating new ones.
+- To read a rule, use `get_rule("NN-name.md")`.
