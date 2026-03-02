@@ -33,3 +33,12 @@
 
 .pio
 cores3/.env
+*.log
+
+# Editor/IDE
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
