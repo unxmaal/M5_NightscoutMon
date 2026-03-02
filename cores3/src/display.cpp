@@ -7,6 +7,30 @@
 #include <stdio.h>
 #include <math.h>
 
+/* ── Offscreen canvas for flicker-free rendering ─────────────── */
+
+static M5Canvas canvas(&M5.Display);
+static bool canvasReady = false;
+
+void initCanvas() {
+    canvas.setColorDepth(16);
+    void* buf = canvas.createSprite(320, 240);
+    canvasReady = (buf != nullptr);
+    if (!canvasReady)
+        Serial.println("[DISPLAY] Canvas alloc failed, using direct draw");
+    else
+        Serial.println("[DISPLAY] Canvas allocated (320x240 in PSRAM)");
+}
+
+/* ── GFX target: canvas if available, else direct display ────── */
+
+static LGFX_Device& directGfx() { return M5.Display; }
+
+static LovyanGFX& gfx() {
+    if (canvasReady) return canvas;
+    return directGfx();
+}
+
 /* ── Color mapping: model COLOR_* → TFT hardware colors ──────── */
 
 static uint16_t mapColor(int c) {
@@ -40,6 +64,8 @@ void drawArrow(int x, int y, int size, int angle, uint16_t color) {
     if (angle == 180)
         return;  // no arrow for unknown direction
 
+    auto &g = gfx();
+
     float rad = (angle + 85) * M_PI / 180.0f;
     float cosA = cosf(rad);
     float sinA = sinf(rad);
@@ -49,7 +75,7 @@ void drawArrow(int x, int y, int size, int angle, uint16_t color) {
     int tipY = y + (int)(size * 2 * sinA);
 
     // Draw shaft
-    M5.Display.drawLine(x, y, tipX, tipY, color);
+    g.drawLine(x, y, tipX, tipY, color);
 
     // Arrowhead — two lines from tip at ±30 degrees
     float headLen = size * 0.8f;
@@ -57,13 +83,15 @@ void drawArrow(int x, int y, int size, int angle, uint16_t color) {
         float headRad = rad + sign * (M_PI / 6.0f) + M_PI;
         int hx = tipX + (int)(headLen * cosf(headRad));
         int hy = tipY + (int)(headLen * sinf(headRad));
-        M5.Display.drawLine(tipX, tipY, hx, hy, color);
+        g.drawLine(tipX, tipY, hx, hy, color);
     }
 }
 
 /* ── Battery icon ──────────────────────────────────────────────── */
 
 static void drawBattery(int x, int y, int pct) {
+    auto &g = gfx();
+
     uint16_t color = TFT_GREEN;
     if (pct < 0) {
         color = TFT_LIGHTGREY;  // unknown
@@ -75,13 +103,13 @@ static void drawBattery(int x, int y, int pct) {
     }
 
     // Battery outline
-    M5.Display.drawRect(x, y, 20, 10, TFT_LIGHTGREY);
-    M5.Display.fillRect(x + 20, y + 2, 2, 6, TFT_LIGHTGREY);
+    g.drawRect(x, y, 20, 10, TFT_LIGHTGREY);
+    g.fillRect(x + 20, y + 2, 2, 6, TFT_LIGHTGREY);
 
     // Fill
     int fillW = (16 * pct) / 100;
     if (fillW > 0)
-        M5.Display.fillRect(x + 2, y + 2, fillW, 6, color);
+        g.fillRect(x + 2, y + 2, fillW, 6, color);
 }
 
 /* ── Page 0: Large glucose ─────────────────────────────────────── */
@@ -93,7 +121,7 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
     int time_hour = ns.sensTm.tm_hour;
     int time_min  = ns.sensTm.tm_min;
 
-    if (getLocalTime(&now)) {
+    if (getLocalTime(&now, 10)) {
         now_sec = mktime(&now);
         if (cfg.show_current_time) {
             time_hour = now.tm_hour;
@@ -113,8 +141,6 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
                            cfg.snd_alarm_high, cfg.snd_warning_high,
                            sensorAgeMin, cfg.snd_no_readings, false);
 
-    // Compute snooze remaining (passed in from alarm state via info line)
-    // For now, alarm bar is driven by level alone; snooze handled by drawAlarmInfoLine
     int snoozeRem = 0;
 
     GlucosePageModel model;
@@ -130,25 +156,27 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
 
     // ── Render from model ─────────────────────────────────────────
 
-    M5.Display.fillRect(0, 0, 320, 240, TFT_BLACK);
+    auto &g = gfx();
+
+    g.fillRect(0, 0, 320, 240, TFT_BLACK);
 
     // Top bar: time (left), delta (right)
-    M5.Display.setTextSize(1);
-    M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    M5.Display.setFont(&FreeSansBold24pt7b);
-    M5.Display.drawString(model.time_str, 0, 0);
+    g.setTextSize(1);
+    g.setTextDatum(TL_DATUM);
+    g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    g.setFont(&FreeSansBold24pt7b);
+    g.drawString(model.time_str, 0, 0);
 
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.drawString(model.delta_str, 180, 0);
+    g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.drawString(model.delta_str, 180, 0);
 
     // Center: glucose value
-    M5.Display.setTextColor(mapColor(model.glucose_color), TFT_BLACK);
-    M5.Display.setTextDatum(MC_DATUM);
-    M5.Display.setTextSize(4);
-    M5.Display.setFont(mapFont(model.glucose_font));
-    M5.Display.drawString(model.glucose_str, 160, 120);
-    M5.Display.setTextSize(1);
+    g.setTextColor(mapColor(model.glucose_color), TFT_BLACK);
+    g.setTextDatum(MC_DATUM);
+    g.setTextSize(4);
+    g.setFont(mapFont(model.glucose_font));
+    g.drawString(model.glucose_str, 160, 120);
+    g.setTextSize(1);
 
     // Trend arrow
     int arrowY = 0;
@@ -162,31 +190,31 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
 
     // Sensor staleness
     if (model.show_age) {
-        M5.Display.setTextDatum(TR_DATUM);
-        M5.Display.setTextColor(mapColor(model.age_color), TFT_BLACK);
-        M5.Display.setFont(&FreeSans9pt7b);
-        M5.Display.drawString(model.age_str, 318, 45);
+        g.setTextDatum(TR_DATUM);
+        g.setTextColor(mapColor(model.age_color), TFT_BLACK);
+        g.setFont(&FreeSans9pt7b);
+        g.drawString(model.age_str, 318, 45);
     }
 
     // Bottom bar
     drawBattery(296, 226, model.battery_pct);
 
     if (model.show_error_badge) {
-        M5.Display.setTextDatum(TL_DATUM);
-        M5.Display.setTextColor(TFT_RED, TFT_BLACK);
-        M5.Display.setFont(&FreeSans9pt7b);
-        M5.Display.drawString("!", 2, 224);
+        g.setTextDatum(TL_DATUM);
+        g.setTextColor(TFT_RED, TFT_BLACK);
+        g.setFont(&FreeSans9pt7b);
+        g.drawString("!", 2, 224);
     }
 
     // Alarm bar
     if (model.show_alarm_bar) {
-        M5.Display.fillRect(0, 220, 320, 20, mapColor(model.alarm_bar_bg));
+        g.fillRect(0, 220, 320, 20, mapColor(model.alarm_bar_bg));
         if (model.alarm_bar_text[0] != '\0') {
-            M5.Display.setTextDatum(MC_DATUM);
-            M5.Display.setTextColor(mapColor(model.alarm_bar_fg),
+            g.setTextDatum(MC_DATUM);
+            g.setTextColor(mapColor(model.alarm_bar_fg),
                                     mapColor(model.alarm_bar_bg));
-            M5.Display.setFont(&FreeSansBold12pt7b);
-            M5.Display.drawString(model.alarm_bar_text, 160, 230);
+            g.setFont(&FreeSansBold12pt7b);
+            g.drawString(model.alarm_bar_text, 160, 230);
         }
     }
 }
@@ -225,40 +253,42 @@ void drawStatusPage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog)
 
     // ── Render from model ─────────────────────────────────────────
 
-    M5.Display.fillScreen(TFT_BLACK);
-    M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
+    auto &g = gfx();
+
+    g.fillScreen(TFT_BLACK);
+    g.setTextDatum(TL_DATUM);
+    g.setTextSize(1);
 
     // Header
-    M5.Display.setFont(&FreeMono9pt7b);
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.drawString("Date  Time  Error Log", 0, 0);
+    g.setFont(&FreeMono9pt7b);
+    g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.drawString("Date  Time  Error Log", 0, 0);
 
     if (model.display_count == 0) {
-        M5.Display.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-        M5.Display.drawString("no errors in log", 0, 20);
+        g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+        g.drawString("no errors in log", 0, 20);
     } else {
         for (int i = 0; i < model.display_count; i++) {
-            M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-            M5.Display.drawString(model.errors[i].date_str, 0, 20 + i * 18);
+            g.setTextColor(TFT_WHITE, TFT_BLACK);
+            g.drawString(model.errors[i].date_str, 0, 20 + i * 18);
 
-            M5.Display.setTextColor(mapColor(model.errors[i].color), TFT_BLACK);
-            M5.Display.drawString(model.errors[i].desc_str, 132, 20 + i * 18);
+            g.setTextColor(mapColor(model.errors[i].color), TFT_BLACK);
+            g.drawString(model.errors[i].desc_str, 132, 20 + i * 18);
         }
 
-        M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+        g.setTextColor(TFT_WHITE, TFT_BLACK);
         char countStr[32];
         snprintf(countStr, sizeof(countStr), "Total errors %d", model.error_count);
-        M5.Display.drawString(countStr, 0, 20 + model.display_count * 18);
+        g.drawString(countStr, 0, 20 + model.display_count * 18);
     }
 
     // System info
     int infoY = 20 + 7 * 18;
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.drawString(model.heap_str, 0, infoY);
-    M5.Display.drawString(model.uptime_str, 0, infoY + 18);
-    M5.Display.drawString(model.ip_str, 0, infoY + 36);
-    M5.Display.drawString(model.version_str, 0, infoY + 54);
+    g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.drawString(model.heap_str, 0, infoY);
+    g.drawString(model.uptime_str, 0, infoY + 18);
+    g.drawString(model.ip_str, 0, infoY + 36);
+    g.drawString(model.version_str, 0, infoY + 54);
 
     drawBattery(296, 226, model.battery_pct);
 }
@@ -270,5 +300,12 @@ void drawPage(int page, const Config &cfg, const NSinfo &ns, const ErrorLog &err
         case PAGE_GLUCOSE: drawGlucosePage(cfg, ns, errLog); break;
         case PAGE_STATUS:  drawStatusPage(cfg, ns, errLog); break;
         default:           drawGlucosePage(cfg, ns, errLog); break;
+    }
+
+    // Flush canvas to display atomically (zero flicker)
+    if (canvasReady) {
+        M5.Display.startWrite();
+        canvas.pushSprite(0, 0);
+        M5.Display.endWrite();
     }
 }

@@ -7,6 +7,8 @@
 #include <string.h>
 #include <stdio.h>
 
+#define NS_LOG Serial
+
 /* ── ErrorLog ──────────────────────────────────────────────────── */
 
 void ErrorLog::add(int code) {
@@ -17,7 +19,7 @@ void ErrorLog::add(int code) {
         ptr = ERR_LOG_SIZE - 1;
     }
     struct tm timeinfo;
-    if (getLocalTime(&timeinfo))
+    if (getLocalTime(&timeinfo, 10))
         entries[ptr].err_time = timeinfo;
     entries[ptr].err_code = code;
     ptr++;
@@ -53,10 +55,14 @@ static void appendToken(char *url, size_t urlSize, const char *token) {
 static int httpGetSanitized(const char *url, char **outBuf, size_t *outLen,
                              ErrorLog &errLog, int errCode) {
     HTTPClient http;
+    http.setConnectTimeout(10000);
+    http.setTimeout(15000);
+    NS_LOG.printf("[HTTP] GET %s\n", url);
     http.begin(url);
     http.collectHeaders(new const char*[1]{"location"}, 1);
 
     int httpCode = http.GET();
+    NS_LOG.printf("[HTTP] Response: %d\n", httpCode);
     if (httpCode <= 0) {
         errLog.add(httpCode);
         http.end();
@@ -70,6 +76,7 @@ static int httpGetSanitized(const char *url, char **outBuf, size_t *outLen,
 
     String json = http.getString();
     http.end();
+    NS_LOG.printf("[HTTP] Body: %d bytes\n", (int)json.length());
 
     // Sanitize into a mutable buffer
     size_t jsonLen = json.length();
@@ -175,6 +182,11 @@ static int fetchProperties(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
 /* ── Public API ────────────────────────────────────────────────── */
 
 int readNightscout(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
+    if (cfg.url[0] == '\0') {
+        errLog.add(ERR_NO_DATA);
+        return ERR_NO_DATA;
+    }
+
     int rc = fetchSGV(cfg, ns, errLog);
     if (rc != 0)
         return rc;

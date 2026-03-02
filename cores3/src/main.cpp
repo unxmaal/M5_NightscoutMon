@@ -7,6 +7,7 @@
 #include "nightscout.h"
 #include "display.h"
 #include "alerts.h"
+#include "ota.h"
 #include "ns_config_parse.h"
 
 /* ── Globals ───────────────────────────────────────────────────── */
@@ -70,9 +71,19 @@ static void connectWiFi() {
     WiFi.disconnect();
     delay(100);
 
+    int apCount = 0;
     for (int i = 0; i < CFG_MAX_WLAN; i++) {
-        if (cfg.wlanssid[i][0] != '\0')
+        if (cfg.wlanssid[i][0] != '\0') {
             wifiMulti.addAP(cfg.wlanssid[i], cfg.wlanpass[i]);
+            apCount++;
+        }
+    }
+
+    // Wokwi virtual network — harmless on real hardware (AP won't exist)
+    wifiMulti.addAP("Wokwi-GUEST", "");
+
+    if (apCount == 0) {
+        Serial.println("[WIFI] No user SSIDs configured (Wokwi-GUEST added as fallback)");
     }
 
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -80,30 +91,37 @@ static void connectWiFi() {
     M5.Display.setTextDatum(TL_DATUM);
     M5.Display.drawString("Connecting WiFi...", 10, 100);
 
+    Serial.printf("[WIFI] Connecting (%d APs)...\n", apCount);
     int attempts = 0;
-    while (wifiMulti.run() != WL_CONNECTED && attempts < 40) {
+    while (wifiMulti.run() != WL_CONNECTED && attempts < 10) {
         delay(500);
         attempts++;
     }
 
     if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("[WIFI] Connected, IP: %s\n",
+                   WiFi.localIP().toString().c_str());
         M5.Display.fillScreen(TFT_BLACK);
         M5.Display.drawString("WiFi connected", 10, 100);
         M5.Display.drawString(WiFi.localIP().toString().c_str(), 10, 120);
         delay(1000);
+
+        // NTP time sync
+        Serial.println("[NTP] Syncing time...");
+        configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
+        struct tm timeinfo;
+        for (int i = 0; i < 10; i++) {
+            if (getLocalTime(&timeinfo, 10)) {
+                Serial.println("[NTP] Time synced");
+                break;
+            }
+            delay(1000);
+        }
     } else {
+        Serial.println("[WIFI] Connection failed");
         M5.Display.fillScreen(TFT_BLACK);
         M5.Display.setTextColor(TFT_RED, TFT_BLACK);
         M5.Display.drawString("WiFi FAILED", 10, 100);
-        delay(2000);
-    }
-
-    // NTP time sync
-    configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
-    struct tm timeinfo;
-    for (int i = 0; i < 30; i++) {
-        if (getLocalTime(&timeinfo))
-            break;
         delay(1000);
     }
 }
@@ -125,7 +143,7 @@ static void pollNightscout() {
     // Only poll if data is stale (>5 min) and we've waited a few cycles
     struct tm now;
     int sensorAgeSec = 86400;
-    if (getLocalTime(&now))
+    if (getLocalTime(&now, 10))
         sensorAgeSec = (int)difftime(mktime(&now), ns.sensTime);
 
     if (sensorAgeSec > 305 && pollCount > 3) {
@@ -143,18 +161,44 @@ void setup() {
     auto m5cfg = M5.config();
     M5.begin(m5cfg);
 
+    Serial.begin(115200);
+    Serial.println("[BOOT] M5Unified initialized");
+    Serial.printf("[BOOT] Board: %d\n", M5.getBoard());
+
     // Speaker
     M5.Speaker.begin();
     M5.Speaker.setVolume(64);
 
     // Load config: defaults first, then overlay from SD INI
     configDefaults(&cfg);
-    loadConfigFromSD();
+    Serial.println("[CONFIG] Defaults loaded");
+
+    if (loadConfigFromSD()) {
+        Serial.println("[CONFIG] SD config loaded OK");
+    } else {
+        Serial.println("[CONFIG] SD failed, using defaults");
+        // Fallback for testing without SD card — reads from build flags
+        #ifdef TEST_NS_URL
+        strlcpy(cfg.url, TEST_NS_URL, sizeof(cfg.url));
+        #endif
+        #ifdef TEST_NS_TOKEN
+        strlcpy(cfg.token, TEST_NS_TOKEN, sizeof(cfg.token));
+        #endif
+    }
+
+    Serial.printf("[CONFIG] url=%s\n", cfg.url);
+    Serial.printf("[CONFIG] device=%s\n", cfg.deviceName);
+    Serial.printf("[CONFIG] brightness=%d/%d/%d\n",
+               cfg.brightness1, cfg.brightness2, cfg.brightness3);
+    Serial.printf("[CONFIG] thresholds yellow=%.1f-%.1f red=%.1f-%.1f\n",
+               cfg.yellow_low, cfg.yellow_high, cfg.red_low, cfg.red_high);
 
     brightnessValues[0] = cfg.brightness1;
     brightnessValues[1] = cfg.brightness2;
     brightnessValues[2] = cfg.brightness3;
     M5.Display.setBrightness(brightnessValues[brightnessLevel]);
+
+    initCanvas();
 
     currentPage = cfg.default_page;
 
@@ -165,18 +209,35 @@ void setup() {
     M5.Display.drawString(cfg.deviceName, 160, 60);
     M5.Display.setFont(&FreeSans9pt7b);
     M5.Display.drawString("CoreS3", 160, 100);
+    Serial.println("[DISPLAY] Splash screen drawn");
 
     connectWiFi();
 
-    // Initial fetch
-    readNightscout(cfg, ns, errLog);
+    // OTA updates (only useful once WiFi is connected)
+    if (WiFi.status() == WL_CONNECTED) {
+        setupOTA(cfg.deviceName);
+    }
+
+    // Initial fetch (will fail without WiFi — that's OK)
+    Serial.println("[NS] Initial Nightscout fetch...");
+    int nsRc = readNightscout(cfg, ns, errLog);
+    Serial.printf("[NS] Result: %d, errors logged: %d\n", nsRc, errLog.count);
+
+    Serial.println("[DISPLAY] Drawing initial page...");
+    Serial.flush();
     drawPage(currentPage, cfg, ns, errLog);
+    Serial.printf("[DISPLAY] Page %d drawn (glucose=%.1f mmol, dir=%s)\n",
+                  currentPage, ns.sensSgv, ns.sensDir);
+    Serial.flush();
+    Serial.println("[BOOT] Setup complete, entering loop");
+    Serial.flush();
 }
 
 /* ── Loop ──────────────────────────────────────────────────────── */
 
 void loop() {
     M5.update();
+    handleOTA();
 
     // Button A (left touch zone): cycle brightness
     if (M5.BtnA.wasPressed()) {

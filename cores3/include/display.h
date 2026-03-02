@@ -9,6 +9,12 @@
 #define NUM_PAGES     2
 
 /**
+ * Allocate offscreen canvas for flicker-free rendering.
+ * Call once after M5.begin(). Falls back to direct draw on failure.
+ */
+void initCanvas();
+
+/**
  * Draw the large glucose screen.
  * Shows: time, delta, huge glucose number, trend arrow, status line.
  */

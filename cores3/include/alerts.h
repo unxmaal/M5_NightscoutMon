@@ -30,11 +30,4 @@ struct AlarmState {
  */
 void checkAlarms(const Config &cfg, const NSinfo &ns, AlarmState &alarm);
 
-/**
- * Draw the alarm info line at the bottom of the screen.
- * Shows snooze countdown or alarm state.
- */
-void drawAlarmInfoLine(const Config &cfg, const NSinfo &ns,
-                       const AlarmState &alarm);
-
 #endif // CORES3_ALERTS_H
