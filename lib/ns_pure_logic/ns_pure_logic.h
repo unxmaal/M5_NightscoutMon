@@ -84,6 +84,69 @@ bool parseIPAddress(const char* str, uint8_t ip[4]);
  */
 bool parseMACAddress(const char* str, uint8_t mac[6]);
 
+/* ── Glucose color level ───────────────────────────────────────── */
+
+#define GLUCOSE_COLOR_GREEN  0
+#define GLUCOSE_COLOR_YELLOW 1
+#define GLUCOSE_COLOR_RED    2
+
+/**
+ * Determine display color for a glucose value given warning/alert thresholds.
+ * Returns GLUCOSE_COLOR_GREEN, GLUCOSE_COLOR_YELLOW, or GLUCOSE_COLOR_RED.
+ *
+ * Logic matches the .ino: yellow if outside [yellow_low..yellow_high],
+ * red overrides if outside [red_low..red_high].
+ */
+int glucoseColor(float sgv, float yellow_low, float yellow_high,
+                 float red_low, float red_high);
+
+/* ── Alarm level decision ──────────────────────────────────────── */
+
+#define ALARM_LEVEL_NORMAL       0
+#define ALARM_LEVEL_LOW_ALARM    1
+#define ALARM_LEVEL_LOW_WARNING  2
+#define ALARM_LEVEL_HIGH_ALARM   3
+#define ALARM_LEVEL_HIGH_WARNING 4
+#define ALARM_LEVEL_NO_READINGS  5
+#define ALARM_LEVEL_LOOP_ERROR   6
+
+/**
+ * Determine the alarm level from glucose value + config thresholds.
+ * Mirrors the priority chain in handleAlarmsInfoLine():
+ *   1. Low alarm   (sgv <= snd_alarm && sgv >= 0.1)
+ *   2. Low warning  (sgv <= snd_warning && sgv >= 0.1)
+ *   3. High alarm   (sgv >= snd_alarm_high)
+ *   4. High warning  (sgv >= snd_warning_high)
+ *   5. No readings   (sensor_age_min >= snd_no_readings)
+ *   6. Loop error    (has_loop_error)
+ *   7. Normal
+ */
+int alarmLevel(float sgv, float snd_alarm, float snd_warning,
+               float snd_alarm_high, float snd_warning_high,
+               unsigned int sensor_age_min, unsigned int snd_no_readings,
+               bool has_loop_error);
+
+/* ── Glucose string formatting ─────────────────────────────────── */
+
+#define FONT_LARGE  0
+#define FONT_MEDIUM 1
+
+/**
+ * Format a glucose value into a display string.
+ *   show_mgdl=true  → use sgv_mgdl, integer format ("120")
+ *   show_mgdl=false → use sgv_mmol, one decimal ("8.4" or "12.3")
+ * Returns a font hint: FONT_LARGE or FONT_MEDIUM.
+ */
+int formatGlucose(char *buf, size_t bufsize,
+                  float sgv_mmol, float sgv_mgdl, bool show_mgdl);
+
+/* ── Uptime formatting ─────────────────────────────────────────── */
+
+/**
+ * Format milliseconds into "DDd HH:MM:SS" string.
+ */
+void formatUptime(char *buf, size_t bufsize, unsigned long millis);
+
 #ifdef __cplusplus
 }
 #endif

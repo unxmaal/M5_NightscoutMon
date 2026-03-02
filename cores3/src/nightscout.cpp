@@ -1,0 +1,189 @@
+#include "nightscout.h"
+#include "ns_pure_logic.h"
+#include "ns_json_parse.h"
+
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <string.h>
+#include <stdio.h>
+
+/* ── ErrorLog ──────────────────────────────────────────────────── */
+
+void ErrorLog::add(int code) {
+    if (ptr >= ERR_LOG_SIZE) {
+        // shift left — drop oldest
+        for (int i = 0; i < ERR_LOG_SIZE - 1; i++)
+            entries[i] = entries[i + 1];
+        ptr = ERR_LOG_SIZE - 1;
+    }
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo))
+        entries[ptr].err_time = timeinfo;
+    entries[ptr].err_code = code;
+    ptr++;
+    count++;
+}
+
+/* ── URL builder ───────────────────────────────────────────────── */
+
+static void buildBaseUrl(char *out, size_t outSize, const char *url) {
+    out[0] = '\0';
+    if (strncmp(url, "http", 4) != 0)
+        strlcat(out, "https://", outSize);
+    strlcat(out, url, outSize);
+
+    // strip trailing slash
+    size_t len = strlen(out);
+    if (len > 0 && out[len - 1] == '/')
+        out[len - 1] = '\0';
+}
+
+static void appendToken(char *url, size_t urlSize, const char *token) {
+    if (token[0] == '\0')
+        return;
+    if (strchr(url, '?'))
+        strlcat(url, "&token=", urlSize);
+    else
+        strlcat(url, "?token=", urlSize);
+    strlcat(url, token, urlSize);
+}
+
+/* ── HTTP fetch + sanitize helper ─────────────────────────────── */
+
+static int httpGetSanitized(const char *url, char **outBuf, size_t *outLen,
+                             ErrorLog &errLog, int errCode) {
+    HTTPClient http;
+    http.begin(url);
+    http.collectHeaders(new const char*[1]{"location"}, 1);
+
+    int httpCode = http.GET();
+    if (httpCode <= 0) {
+        errLog.add(httpCode);
+        http.end();
+        return httpCode;
+    }
+    if (httpCode != 200) {
+        errLog.add(httpCode);
+        http.end();
+        return httpCode;
+    }
+
+    String json = http.getString();
+    http.end();
+
+    // Sanitize into a mutable buffer
+    size_t jsonLen = json.length();
+    char *buf = new char[jsonLen + 1];
+    json.toCharArray(buf, jsonLen + 1);
+    jsonLen = sanitizeJson(buf, jsonLen);
+
+    *outBuf = buf;
+    *outLen = jsonLen;
+    return 0;
+}
+
+/* ── First request: SGV data ───────────────────────────────────── */
+
+static int fetchSGV(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
+    char nsUrl[320];
+    buildBaseUrl(nsUrl, sizeof(nsUrl), cfg.url);
+
+    bool isSugarmate = (strstr(nsUrl, "sugarmate") != nullptr);
+
+    if (!isSugarmate) {
+        strlcat(nsUrl, "/api/v1/entries.json?count=10", sizeof(nsUrl));
+        if (cfg.sgv_only)
+            strlcat(nsUrl, "&find[type][$eq]=sgv", sizeof(nsUrl));
+    }
+    appendToken(nsUrl, sizeof(nsUrl), cfg.token);
+
+    char *buf = nullptr;
+    size_t bufLen = 0;
+    int rc = httpGetSanitized(nsUrl, &buf, &bufLen, errLog, ERR_JSON_PARSE);
+    if (rc != 0)
+        return rc;
+
+    SGVEntry entry;
+    DeltaInfo delta;
+    int parseResult;
+
+    if (isSugarmate) {
+        parseResult = parseSugarmateResponse(buf, bufLen, &entry, &delta);
+    } else {
+        parseResult = parseSGVResponse(buf, bufLen, &entry);
+    }
+    delete[] buf;
+
+    if (parseResult != PARSE_OK) {
+        int code = (parseResult == PARSE_ERR_EMPTY) ? ERR_NO_DATA : ERR_JSON_PARSE;
+        errLog.add(code);
+        return code;
+    }
+
+    // Map SGVEntry → NSinfo
+    strlcpy(ns.sensDev, entry.device, sizeof(ns.sensDev));
+    ns.rawtime = entry.date_ms;
+    ns.sensTime = entry.date_sec;
+    localtime_r(&ns.sensTime, &ns.sensTm);
+    strlcpy(ns.sensDir, entry.direction, sizeof(ns.sensDir));
+    ns.sensSgvMgDl = entry.sgv_mgdl;
+    ns.sensSgv = entry.sgv_mmol;
+    ns.arrowAngle = entry.arrow_angle;
+
+    // Sugarmate provides delta in the SGV response
+    if (isSugarmate) {
+        ns.delta_mgdl = delta.mgdl;
+        ns.delta_scaled = delta.mmol;
+        formatDelta(ns.delta_display, sizeof(ns.delta_display),
+                    &delta, cfg.show_mgdl);
+    }
+
+    return 0;
+}
+
+/* ── Second request: delta/properties ──────────────────────────── */
+
+static int fetchProperties(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
+    char nsUrl[320];
+    buildBaseUrl(nsUrl, sizeof(nsUrl), cfg.url);
+    strlcat(nsUrl, "/api/v2/properties/delta", sizeof(nsUrl));
+    appendToken(nsUrl, sizeof(nsUrl), cfg.token);
+
+    char *buf = nullptr;
+    size_t bufLen = 0;
+    int rc = httpGetSanitized(nsUrl, &buf, &bufLen, errLog, ERR_JSON2_PARSE);
+    if (rc != 0)
+        return rc;
+
+    DeltaInfo delta;
+    int parseResult = parseDeltaResponse(buf, bufLen, &delta);
+    delete[] buf;
+
+    if (parseResult != PARSE_OK) {
+        errLog.add(ERR_JSON2_PARSE);
+        return ERR_JSON2_PARSE;
+    }
+
+    ns.delta_mgdl = delta.mgdl;
+    ns.delta_scaled = delta.mmol;
+    formatDelta(ns.delta_display, sizeof(ns.delta_display),
+                &delta, cfg.show_mgdl);
+
+    return 0;
+}
+
+/* ── Public API ────────────────────────────────────────────────── */
+
+int readNightscout(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
+    int rc = fetchSGV(cfg, ns, errLog);
+    if (rc != 0)
+        return rc;
+
+    // Sugarmate already provides delta in the SGV response
+    if (strstr(cfg.url, "sugarmate") != nullptr)
+        return 0;
+
+    // Fetch delta from properties endpoint — non-fatal if it fails
+    fetchProperties(cfg, ns, errLog);
+    return 0;
+}
