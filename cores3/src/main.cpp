@@ -8,6 +8,7 @@
 #include "display.h"
 #include "alerts.h"
 #include "ota.h"
+#include "webconfig.h"
 #include "ns_config_parse.h"
 
 /* ── Globals ───────────────────────────────────────────────────── */
@@ -216,6 +217,7 @@ void setup() {
     // OTA updates (only useful once WiFi is connected)
     if (WiFi.status() == WL_CONNECTED) {
         setupOTA(cfg.deviceName);
+        setupWebConfig(&cfg);
     }
 
     // Initial fetch (will fail without WiFi — that's OK)
@@ -238,6 +240,7 @@ void setup() {
 void loop() {
     M5.update();
     handleOTA();
+    handleWebConfig();
 
     // Button A (left touch zone): cycle brightness
     if (M5.BtnA.wasPressed()) {

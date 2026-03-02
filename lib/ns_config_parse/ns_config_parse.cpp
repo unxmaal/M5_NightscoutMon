@@ -188,3 +188,65 @@ int parseConfigBuffer(char *buf, size_t len, ParsedConfig *cfg) {
 
     return parsed;
 }
+
+/* ── Serialization ─────────────────────────────────────────────── */
+
+int serializeConfigINI(const ParsedConfig *cfg, char *buf, size_t bufSize) {
+    if (!cfg || !buf || bufSize == 0) return 0;
+
+    int pos = 0;
+    int n;
+
+#define EMIT(...) do { \
+    n = snprintf(buf + pos, bufSize - (size_t)pos, __VA_ARGS__); \
+    if (n < 0 || (size_t)(pos + n) >= bufSize) return 0; \
+    pos += n; \
+} while(0)
+
+    EMIT("[config]\n");
+    EMIT("nightscout = %s\n", cfg->url);
+    EMIT("token = %s\n", cfg->token);
+    EMIT("name = %s\n", cfg->userName);
+    EMIT("device_name = %s\n", cfg->deviceName);
+    EMIT("time_zone = %d\n", cfg->timeZone);
+    EMIT("dst = %d\n", cfg->dst);
+    EMIT("show_mgdl = %d\n", cfg->show_mgdl);
+    EMIT("show_current_time = %d\n", cfg->show_current_time);
+    EMIT("default_page = %d\n", cfg->default_page);
+    EMIT("sgv_only = %d\n", cfg->sgv_only);
+    EMIT("info_line = %d\n", cfg->info_line);
+    EMIT("date_format = %d\n", cfg->date_format);
+    EMIT("time_format = %d\n", cfg->time_format);
+    EMIT("yellow_low = %.1f\n", (double)cfg->yellow_low);
+    EMIT("yellow_high = %.1f\n", (double)cfg->yellow_high);
+    EMIT("red_low = %.1f\n", (double)cfg->red_low);
+    EMIT("red_high = %.1f\n", (double)cfg->red_high);
+    EMIT("snd_alarm = %.1f\n", (double)cfg->snd_alarm);
+    EMIT("snd_warning = %.1f\n", (double)cfg->snd_warning);
+    EMIT("snd_alarm_high = %.1f\n", (double)cfg->snd_alarm_high);
+    EMIT("snd_warning_high = %.1f\n", (double)cfg->snd_warning_high);
+    EMIT("snd_no_readings = %d\n", cfg->snd_no_readings);
+    EMIT("snooze_timeout = %d\n", cfg->snooze_timeout);
+    EMIT("alarm_repeat = %d\n", cfg->alarm_repeat);
+    EMIT("warning_volume = %d\n", cfg->warning_volume);
+    EMIT("alarm_volume = %d\n", cfg->alarm_volume);
+    EMIT("brightness1 = %d\n", cfg->brightness1);
+    EMIT("brightness2 = %d\n", cfg->brightness2);
+    EMIT("brightness3 = %d\n", cfg->brightness3);
+    EMIT("restart_at_logged_errors = %d\n", cfg->restart_at_logged_errors);
+    EMIT("restart_at_time = %s\n", cfg->restart_at_time);
+    EMIT("snd_loop_error = %d\n", cfg->snd_loop_error);
+
+    for (int i = 0; i < CFG_MAX_WLAN; i++) {
+        if (cfg->wlanssid[i][0] != '\0') {
+            EMIT("\n[wlan%d]\n", i + 1);
+            EMIT("ssid = %s\n", cfg->wlanssid[i]);
+            EMIT("pass = %s\n", cfg->wlanpass[i]);
+        }
+    }
+
+#undef EMIT
+
+    buf[pos] = '\0';
+    return pos;
+}
