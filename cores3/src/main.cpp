@@ -52,7 +52,7 @@ static bool loadConfigFromSD() {
     }
 
     char *buf = new char[fileSize + 1];
-    size_t bytesRead = f.read((uint8_t *)buf, fileSize);
+    size_t bytesRead = f.read(reinterpret_cast<uint8_t*>(buf), fileSize);
     f.close();
     SD.end();
 

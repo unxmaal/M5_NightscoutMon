@@ -5,6 +5,7 @@
  */
 
 #include "ns_config_parse.h"
+#include "ns_pure_logic.h"
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -13,7 +14,7 @@
 /* ── Defaults ──────────────────────────────────────────────────── */
 
 void configDefaults(ParsedConfig *cfg) {
-    memset(cfg, 0, sizeof(*cfg));
+    *cfg = ParsedConfig{};
     strlcpy(cfg->deviceName, "NightscoutMon", sizeof(cfg->deviceName));
     cfg->timeZone          = 3600;
     cfg->yellow_low        = 4.5f;
@@ -53,7 +54,7 @@ int parseConfigBuffer(char *buf, size_t len, ParsedConfig *cfg) {
     int currentWlan = -1;  // -1 = [config] section, 0-9 = wlan index
 
     char *p = buf;
-    char *end = buf + len;
+    const char *end = buf + len;
 
     while (p < end) {
         // Find end of line
@@ -77,7 +78,7 @@ int parseConfigBuffer(char *buf, size_t len, ParsedConfig *cfg) {
             char *close = strchr(line, ']');
             if (close) {
                 *close = '\0';
-                char *section = line + 1;
+                const char *section = line + 1;
                 if (strcmp(section, "config") == 0) {
                     currentWlan = -1;
                 } else if (strncmp(section, "wlan", 4) == 0) {
@@ -98,8 +99,8 @@ int parseConfigBuffer(char *buf, size_t len, ParsedConfig *cfg) {
         }
 
         *eq = '\0';
-        char *key = trimWhitespace(line);
-        char *val = trimWhitespace(eq + 1);
+        const char *key = trimWhitespace(line);
+        const char *val = trimWhitespace(eq + 1);
 
         if (currentWlan >= 0 && currentWlan < CFG_MAX_WLAN) {
             // WiFi section
@@ -186,7 +187,28 @@ int parseConfigBuffer(char *buf, size_t len, ParsedConfig *cfg) {
         p = eol + 1;
     }
 
+    validateConfig(cfg);
     return parsed;
+}
+
+/* ── Validation ────────────────────────────────────────────────── */
+
+void validateConfig(ParsedConfig *cfg) {
+    cfg->show_mgdl         = clampInt(cfg->show_mgdl, 0, 1);
+    cfg->show_current_time = clampInt(cfg->show_current_time, 0, 1);
+    cfg->sgv_only          = clampInt(cfg->sgv_only, 0, 1);
+    cfg->info_line         = clampInt(cfg->info_line, 0, 1);
+    cfg->snd_loop_error    = clampInt(cfg->snd_loop_error, 0, 1);
+    cfg->default_page      = clampInt(cfg->default_page, 0, 1);
+    cfg->date_format       = clampInt(cfg->date_format, 0, 3);
+    cfg->brightness1       = clampInt(cfg->brightness1, 0, 100);
+    cfg->brightness2       = clampInt(cfg->brightness2, 0, 100);
+    cfg->brightness3       = clampInt(cfg->brightness3, 0, 100);
+    cfg->warning_volume    = clampInt(cfg->warning_volume, 0, 100);
+    cfg->alarm_volume      = clampInt(cfg->alarm_volume, 0, 100);
+    cfg->snooze_timeout    = clampInt(cfg->snooze_timeout, 0, 1440);
+    cfg->alarm_repeat      = clampInt(cfg->alarm_repeat, 0, 1440);
+    cfg->snd_no_readings   = clampInt(cfg->snd_no_readings, 0, 1440);
 }
 
 /* ── Serialization ─────────────────────────────────────────────── */

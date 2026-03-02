@@ -199,6 +199,18 @@ void test_status_model_with_errors(void) {
     TEST_ASSERT_EQUAL_INT(COLOR_YELLOW, m.errors[2].color);
 }
 
+void test_status_model_null_errors_no_crash(void) {
+    StatusPageModel m;
+    buildStatusModel(&m,
+        NULL, NULL, 5, 10,  // NULL arrays but display_count > 0
+        200000, 3600000UL,
+        "10.0.0.1", "v2",
+        50
+    );
+    TEST_ASSERT_EQUAL_INT(10, m.error_count);
+    TEST_ASSERT_EQUAL_INT(0, m.display_count);  // clamped to 0
+}
+
 void test_status_model_uptime_formatting(void) {
     StatusPageModel m;
     // 2 days 13 hours 45 min 30 sec
@@ -229,6 +241,7 @@ int main(int argc, char **argv) {
     /* Status model */
     RUN_TEST(test_status_model_no_errors);
     RUN_TEST(test_status_model_with_errors);
+    RUN_TEST(test_status_model_null_errors_no_crash);
     RUN_TEST(test_status_model_uptime_formatting);
 
     return UNITY_END();

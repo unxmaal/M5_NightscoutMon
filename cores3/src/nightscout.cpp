@@ -3,9 +3,15 @@
 #include "ns_json_parse.h"
 
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <string.h>
 #include <stdio.h>
+
+/* Encrypted but no cert validation — common for self-signed Nightscout
+   instances. Swap setInsecure() for setCACert() to pin a certificate. */
+static WiFiClientSecure secureClient;
+static bool secureClientInit = false;
 
 #define NS_LOG Serial
 
@@ -58,8 +64,17 @@ static int httpGetSanitized(const char *url, char **outBuf, size_t *outLen,
     http.setConnectTimeout(10000);
     http.setTimeout(15000);
     NS_LOG.printf("[HTTP] GET %s\n", url);
-    http.begin(url);
-    http.collectHeaders(new const char*[1]{"location"}, 1);
+    if (strncmp(url, "https", 5) == 0) {
+        if (!secureClientInit) {
+            secureClient.setInsecure();
+            secureClientInit = true;
+        }
+        http.begin(secureClient, url);
+    } else {
+        http.begin(url);
+    }
+    static const char* hdrs[] = {"location"};
+    http.collectHeaders(hdrs, 1);
 
     int httpCode = http.GET();
     NS_LOG.printf("[HTTP] Response: %d\n", httpCode);

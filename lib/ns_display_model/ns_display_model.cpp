@@ -94,10 +94,10 @@ void buildGlucoseModel(
     if (now_sec > 0 && sensor_time_sec > 0) {
         long age_sec = now_sec - sensor_time_sec;
         int age_min = (int)((age_sec + 30) / 60);
-        if (age_min > 5) {
+        if (age_min > SENSOR_AGE_STALE_MIN) {
             model->show_age = true;
             snprintf(model->age_str, sizeof(model->age_str), "%d min", age_min);
-            model->age_color = (age_min > 15) ? COLOR_RED : COLOR_WHITE;
+            model->age_color = (age_min > SENSOR_AGE_CRITICAL_MIN) ? COLOR_RED : COLOR_WHITE;
         }
     }
 
@@ -135,6 +135,8 @@ void buildStatusModel(
     model->display_count = err_display_count;
     if (model->display_count > STATUS_MAX_ERRORS)
         model->display_count = STATUS_MAX_ERRORS;
+    if (err_codes == NULL || err_dates == NULL)
+        model->display_count = 0;
 
     for (int i = 0; i < model->display_count; i++) {
         strlcpy(model->errors[i].date_str, err_dates[i],

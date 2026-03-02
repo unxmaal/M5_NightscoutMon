@@ -72,7 +72,7 @@ void test_roundtrip_custom_values(void) {
     orig.dst = 1;
     orig.show_mgdl = 1;
     orig.show_current_time = 1;
-    orig.default_page = 2;
+    orig.default_page = 1;
     orig.sgv_only = 1;
     orig.info_line = 0;
     orig.date_format = 2;
@@ -120,7 +120,7 @@ void test_roundtrip_custom_values(void) {
     TEST_ASSERT_EQUAL_INT(-18000, parsed.timeZone);
     TEST_ASSERT_EQUAL_INT(1, parsed.dst);
     TEST_ASSERT_EQUAL_INT(1, parsed.show_mgdl);
-    TEST_ASSERT_EQUAL_INT(2, parsed.default_page);
+    TEST_ASSERT_EQUAL_INT(1, parsed.default_page);
     TEST_ASSERT_FLOAT_WITHIN(0.1f, 5.0f, parsed.yellow_low);
     TEST_ASSERT_FLOAT_WITHIN(0.1f, 12.0f, parsed.red_high);
     TEST_ASSERT_EQUAL_INT(50, parsed.warning_volume);

@@ -14,7 +14,7 @@ static bool canvasReady = false;
 
 void initCanvas() {
     canvas.setColorDepth(16);
-    void* buf = canvas.createSprite(320, 240);
+    const void *buf = canvas.createSprite(320, 240);
     canvasReady = (buf != nullptr);
     if (!canvasReady)
         Serial.println("[DISPLAY] Canvas alloc failed, using direct draw");

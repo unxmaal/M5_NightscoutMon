@@ -9,8 +9,23 @@ static Config *cfgPtr = nullptr;
 
 /* ── HTML helpers ──────────────────────────────────────────────── */
 
+static String escapeHtml(const char *raw) {
+    String s;
+    for (const char *p = raw; *p; p++) {
+        switch (*p) {
+            case '&':  s += "&amp;";  break;
+            case '<':  s += "&lt;";   break;
+            case '>':  s += "&gt;";   break;
+            case '"':  s += "&quot;"; break;
+            case '\'': s += "&#39;";  break;
+            default:   s += *p;       break;
+        }
+    }
+    return s;
+}
+
 static String textInput(const char *label, const char *name, const char *value, int maxlen = 0) {
-    String s = "<label>" + String(label) + "<br><input type='text' name='" + name + "' value='" + String(value) + "'";
+    String s = "<label>" + String(label) + "<br><input type='text' name='" + name + "' value='" + escapeHtml(value) + "'";
     if (maxlen > 0) s += " maxlength='" + String(maxlen) + "'";
     s += "></label><br>\n";
     return s;
@@ -25,13 +40,13 @@ static String floatInput(const char *label, const char *name, float value) {
 }
 
 static String passInput(const char *label, const char *name, const char *value) {
-    return "<label>" + String(label) + "<br><input type='password' name='" + name + "' value='" + String(value) + "'></label><br>\n";
+    return "<label>" + String(label) + "<br><input type='password' name='" + name + "' value='" + escapeHtml(value) + "'></label><br>\n";
 }
 
 /* ── GET / — serve config form ─────────────────────────────────── */
 
 static void handleRoot() {
-    Config &c = *cfgPtr;
+    const Config &c = *cfgPtr;
     String html = "<!DOCTYPE html><html><head>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>NightscoutMon Config</title>"
@@ -187,7 +202,7 @@ static void handleSave() {
     if (SD.begin(GPIO_NUM_4, SPI, 25000000)) {
         File f = SD.open("/M5NS.INI", FILE_WRITE);
         if (f) {
-            f.write((const uint8_t *)ini, (size_t)wrote);
+            f.write(reinterpret_cast<const uint8_t*>(ini), static_cast<size_t>(wrote));
             f.close();
             sdOk = true;
             Serial.printf("[WEBCONFIG] Wrote %d bytes to /M5NS.INI\n", wrote);

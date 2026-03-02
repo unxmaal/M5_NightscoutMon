@@ -99,7 +99,7 @@ void test_parse_numeric_fields(void) {
         "dst = 1\n"
         "show_mgdl = 1\n"
         "show_current_time = 1\n"
-        "default_page = 2\n"
+        "default_page = 1\n"
         "sgv_only = 1\n"
         "info_line = 0\n"
         "date_format = 2\n"
@@ -111,7 +111,7 @@ void test_parse_numeric_fields(void) {
     TEST_ASSERT_EQUAL_INT(1, cfg.dst);
     TEST_ASSERT_EQUAL_INT(1, cfg.show_mgdl);
     TEST_ASSERT_EQUAL_INT(1, cfg.show_current_time);
-    TEST_ASSERT_EQUAL_INT(2, cfg.default_page);
+    TEST_ASSERT_EQUAL_INT(1, cfg.default_page);
     TEST_ASSERT_EQUAL_INT(1, cfg.sgv_only);
     TEST_ASSERT_EQUAL_INT(0, cfg.info_line);
     TEST_ASSERT_EQUAL_INT(2, cfg.date_format);
@@ -395,6 +395,79 @@ void test_parse_section_switching(void) {
     TEST_ASSERT_EQUAL_STRING("Second", cfg.wlanssid[1]);
 }
 
+/* ── Validation / clamping tests ──────────────────────────────── */
+
+void test_validate_brightness_clamped(void) {
+    ParsedConfig cfg;
+    configDefaults(&cfg);
+    size_t len = loadBuf(
+        "[config]\n"
+        "brightness1 = -10\n"
+        "brightness2 = 200\n"
+        "brightness3 = 50\n"
+    );
+    parseConfigBuffer(buf, len, &cfg);
+    TEST_ASSERT_EQUAL_INT(0, cfg.brightness1);
+    TEST_ASSERT_EQUAL_INT(100, cfg.brightness2);
+    TEST_ASSERT_EQUAL_INT(50, cfg.brightness3);
+}
+
+void test_validate_boolean_fields_clamped(void) {
+    ParsedConfig cfg;
+    configDefaults(&cfg);
+    size_t len = loadBuf(
+        "[config]\n"
+        "show_mgdl = 5\n"
+        "sgv_only = -1\n"
+        "info_line = 2\n"
+    );
+    parseConfigBuffer(buf, len, &cfg);
+    TEST_ASSERT_EQUAL_INT(1, cfg.show_mgdl);
+    TEST_ASSERT_EQUAL_INT(0, cfg.sgv_only);
+    TEST_ASSERT_EQUAL_INT(1, cfg.info_line);
+}
+
+void test_validate_volume_clamped(void) {
+    ParsedConfig cfg;
+    configDefaults(&cfg);
+    size_t len = loadBuf(
+        "[config]\n"
+        "warning_volume = 150\n"
+        "alarm_volume = -20\n"
+    );
+    parseConfigBuffer(buf, len, &cfg);
+    TEST_ASSERT_EQUAL_INT(100, cfg.warning_volume);
+    TEST_ASSERT_EQUAL_INT(0, cfg.alarm_volume);
+}
+
+void test_validate_timeout_clamped(void) {
+    ParsedConfig cfg;
+    configDefaults(&cfg);
+    size_t len = loadBuf(
+        "[config]\n"
+        "snooze_timeout = 9999\n"
+        "alarm_repeat = -5\n"
+        "snd_no_readings = 2000\n"
+    );
+    parseConfigBuffer(buf, len, &cfg);
+    TEST_ASSERT_EQUAL_INT(1440, cfg.snooze_timeout);
+    TEST_ASSERT_EQUAL_INT(0, cfg.alarm_repeat);
+    TEST_ASSERT_EQUAL_INT(1440, cfg.snd_no_readings);
+}
+
+void test_validate_date_format_clamped(void) {
+    ParsedConfig cfg;
+    configDefaults(&cfg);
+    size_t len = loadBuf(
+        "[config]\n"
+        "date_format = 10\n"
+        "default_page = 5\n"
+    );
+    parseConfigBuffer(buf, len, &cfg);
+    TEST_ASSERT_EQUAL_INT(3, cfg.date_format);
+    TEST_ASSERT_EQUAL_INT(1, cfg.default_page);
+}
+
 /* ── Main ─────────────────────────────────────────────────────── */
 
 int main(int argc, char **argv) {
@@ -434,6 +507,13 @@ int main(int argc, char **argv) {
     RUN_TEST(test_parse_restart_at_logged_errors);
     RUN_TEST(test_parse_carriage_return_line_endings);
     RUN_TEST(test_parse_section_switching);
+
+    /* Validation / clamping */
+    RUN_TEST(test_validate_brightness_clamped);
+    RUN_TEST(test_validate_boolean_fields_clamped);
+    RUN_TEST(test_validate_volume_clamped);
+    RUN_TEST(test_validate_timeout_clamped);
+    RUN_TEST(test_validate_date_format_clamped);
 
     return UNITY_END();
 }

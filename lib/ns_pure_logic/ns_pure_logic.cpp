@@ -9,6 +9,14 @@
 #include <ctype.h>
 #include <stdio.h>
 
+/* ── Integer clamping ──────────────────────────────────────────── */
+
+int clampInt(int value, int min_val, int max_val) {
+    if (value < min_val) return min_val;
+    if (value > max_val) return max_val;
+    return value;
+}
+
 /* ── CRC-16 ─────────────────────────────────────────────────────── */
 
 uint16_t crc16_update(uint16_t crc, uint8_t a) {
@@ -154,7 +162,7 @@ int alarmLevel(float sgv, float snd_alarm, float snd_warning,
                float snd_alarm_high, float snd_warning_high,
                unsigned int sensor_age_min, unsigned int snd_no_readings,
                bool has_loop_error) {
-    /* Priority chain matches handleAlarmsInfoLine() in .ino */
+    /* Priority chain: low alarm > low warn > high alarm > high warn > no readings > loop error */
     if (sgv <= snd_alarm && sgv >= 0.1f)
         return ALARM_LEVEL_LOW_ALARM;
     if (sgv <= snd_warning && sgv >= 0.1f)
@@ -225,7 +233,7 @@ bool parseIPAddress(const char* str, uint8_t ip[4]) {
 
     int i = 0;
     const char* cp = str;
-    ip[0] = ip[1] = ip[2] = ip[3] = 0;
+    unsigned int accum[4] = {0, 0, 0, 0};
 
     while (*cp != '\0' && i < 4) {
         if (*cp == '.') {
@@ -234,15 +242,22 @@ bool parseIPAddress(const char* str, uint8_t ip[4]) {
             continue;
         }
         if (isdigit((unsigned char)*cp)) {
-            ip[i] *= 10;
-            ip[i] += (*cp - '0');
+            accum[i] = accum[i] * 10 + (*cp - '0');
+            if (accum[i] > 255) {
+                ip[0] = ip[1] = ip[2] = ip[3] = 0;
+                return false;
+            }
         } else {
             ip[0] = ip[1] = ip[2] = ip[3] = 0;
             return false;
         }
         ++cp;
     }
-    return (i == 3);  // must have seen exactly 3 dots
+    if (i != 3)
+        return false;
+    for (int j = 0; j < 4; j++)
+        ip[j] = (uint8_t)accum[j];
+    return true;
 }
 
 bool parseMACAddress(const char* str, uint8_t mac[6]) {
@@ -251,7 +266,7 @@ bool parseMACAddress(const char* str, uint8_t mac[6]) {
 
     int i = 0;
     const char* cp = str;
-    memset(mac, 0, 6);
+    unsigned int accum[6] = {0, 0, 0, 0, 0, 0};
 
     while (*cp != '\0' && i < 6) {
         if (*cp == ':' || *cp == '-') {
@@ -260,16 +275,22 @@ bool parseMACAddress(const char* str, uint8_t mac[6]) {
             continue;
         }
         if (isdigit((unsigned char)*cp)) {
-            mac[i] *= 16;
-            mac[i] += (*cp - '0');
+            accum[i] = accum[i] * 16 + (*cp - '0');
         } else if (isxdigit((unsigned char)*cp)) {
-            mac[i] *= 16;
-            mac[i] += (toupper((unsigned char)*cp) - 55);
+            accum[i] = accum[i] * 16 + (toupper((unsigned char)*cp) - 55);
         } else {
+            memset(mac, 0, 6);
+            return false;
+        }
+        if (accum[i] > 0xFF) {
             memset(mac, 0, 6);
             return false;
         }
         ++cp;
     }
-    return (i == 5);  // must have seen exactly 5 separators
+    if (i != 5)
+        return false;
+    for (int j = 0; j < 6; j++)
+        mac[j] = (uint8_t)accum[j];
+    return true;
 }

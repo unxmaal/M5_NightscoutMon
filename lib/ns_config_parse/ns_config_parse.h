@@ -80,6 +80,11 @@ void configDefaults(ParsedConfig *cfg);
 int parseConfigBuffer(char *buf, size_t len, ParsedConfig *cfg);
 
 /**
+ * Validate and clamp all integer fields to safe ranges.
+ */
+void validateConfig(ParsedConfig *cfg);
+
+/**
  * Serialize a ParsedConfig to INI text (inverse of parseConfigBuffer).
  * Writes into buf up to bufSize bytes (including null terminator).
  * Returns bytes written (excluding null terminator), or 0 if buffer too small.

@@ -18,6 +18,10 @@
 extern "C" {
 #endif
 
+/* ── Integer clamping ──────────────────────────────────────────── */
+
+int clampInt(int value, int min_val, int max_val);
+
 /* ── CRC-16 ─────────────────────────────────────────────────────── */
 
 uint16_t crc16_update(uint16_t crc, uint8_t a);

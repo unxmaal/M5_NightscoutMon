@@ -41,7 +41,7 @@ int parseSGVResponse(const char *json, size_t len, SGVEntry *entry) {
     JsonObject obj = arr[sgvIdx];
 
     strlcpy(entry->device, obj["device"] | "N/A", sizeof(entry->device));
-    entry->date_ms  = obj["date"].as<long long>();
+    entry->date_ms  = static_cast<uint64_t>(obj["date"].as<long long>());
     entry->date_sec = entry->date_ms / 1000;
 
     // Direction: try "direction", fall back to numeric "trend"

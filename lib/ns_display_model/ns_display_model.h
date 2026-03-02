@@ -14,6 +14,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* ── Sensor age thresholds (minutes) ───────────────────────────── */
+
+#define SENSOR_AGE_STALE_MIN     5
+#define SENSOR_AGE_CRITICAL_MIN  15
+
 /* ── Color level (maps to TFT colors in the renderer) ──────────── */
 
 #define COLOR_BLACK     0
