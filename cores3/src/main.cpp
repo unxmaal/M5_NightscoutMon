@@ -201,6 +201,12 @@ void setup() {
 
     initCanvas();
 
+    // Power debug
+    Serial.printf("[POWER] Battery: %d%%, Voltage: %dmV, Charging: %s\n",
+                  M5.Power.getBatteryLevel(),
+                  M5.Power.getBatteryVoltage(),
+                  M5.Power.isCharging() ? "yes" : "no");
+
     currentPage = cfg.default_page;
 
     M5.Display.fillScreen(TFT_BLACK);
@@ -239,22 +245,39 @@ void setup() {
 
 void loop() {
     M5.update();
+
+    // CoreS3 touch → virtual button mapping (touch panel covers display only)
+    auto t = M5.Touch.getDetail();
+    if (t.isPressed() && t.y >= 200) {
+        int zone = t.x / 107;  // 0=left, 1=mid, 2=right (320/3)
+        M5.BtnA.setRawState(t.wasPressed() ? 0 : 0, zone == 0);
+        M5.BtnB.setRawState(t.wasPressed() ? 0 : 0, zone == 1);
+        M5.BtnC.setRawState(t.wasPressed() ? 0 : 0, zone == 2);
+    } else if (t.wasReleased()) {
+        M5.BtnA.setRawState(0, false);
+        M5.BtnB.setRawState(0, false);
+        M5.BtnC.setRawState(0, false);
+    }
+
     handleOTA();
     handleWebConfig();
 
     // Button A (left touch zone): cycle brightness
     if (M5.BtnA.wasPressed()) {
+        Serial.println("[BTN] A pressed");
         cycleBrightness();
     }
 
     // Button B (middle): snooze
     if (M5.BtnB.wasPressed()) {
+        Serial.println("[BTN] B pressed");
         alarmState.snooze(cfg.snooze_timeout);
         drawPage(currentPage, cfg, ns, errLog);
     }
 
     // Button C (right): toggle page
     if (M5.BtnC.wasPressed()) {
+        Serial.println("[BTN] C pressed");
         currentPage = (currentPage + 1) % NUM_PAGES;
         drawPage(currentPage, cfg, ns, errLog);
     }

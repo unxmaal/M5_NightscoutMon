@@ -33,6 +33,7 @@ void configDefaults(ParsedConfig *cfg) {
     cfg->brightness1       = 10;
     cfg->brightness2       = 50;
     cfg->brightness3       = 100;
+    cfg->show_current_time = 1;
     cfg->info_line         = 1;
     cfg->snd_loop_error    = 1;
     strlcpy(cfg->restart_at_time, "NORES", sizeof(cfg->restart_at_time));

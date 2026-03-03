@@ -1,8 +1,10 @@
 #include "webconfig.h"
+#include "alerts.h"
 #include "ns_config_parse.h"
 #include <WebServer.h>
 #include <SD.h>
 #include <M5Unified.h>
+#include <WiFi.h>
 
 static WebServer server(80);
 static Config *cfgPtr = nullptr;
@@ -43,6 +45,18 @@ static String passInput(const char *label, const char *name, const char *value) 
     return "<label>" + String(label) + "<br><input type='password' name='" + name + "' value='" + escapeHtml(value) + "'></label><br>\n";
 }
 
+/* ── Unit conversion (config stores mmol/L internally) ────────── */
+
+static constexpr float MMOL_TO_MGDL = 18.018f;
+
+static float toDisplay(float mmol, bool mgdl) {
+    return mgdl ? mmol * MMOL_TO_MGDL : mmol;
+}
+
+static float fromDisplay(float val, bool mgdl) {
+    return mgdl ? val / MMOL_TO_MGDL : val;
+}
+
 /* ── GET / — serve config form ─────────────────────────────────── */
 
 static void handleRoot() {
@@ -61,6 +75,29 @@ static void handleRoot() {
         "</style></head><body>"
         "<h1>NightscoutMon Config</h1>"
         "<form method='POST' action='/save'>";
+
+    // System status (live, read-only)
+    html += "<h2>System Status</h2>";
+    int batt = M5.Power.getBatteryLevel();
+    int mv   = M5.Power.getBatteryVoltage();
+    bool charging = M5.Power.isCharging();
+    html += "<div style='background:#222;padding:12px;border-radius:6px;font-family:monospace;margin-bottom:12px'>";
+    html += "Battery: " + String(batt) + "% (" + String(mv) + " mV)<br>";
+    html += "Charging: " + String(charging ? "Yes" : "No") + "<br>";
+    html += "Free heap: " + String(ESP.getFreeHeap() / 1024) + " KB<br>";
+    html += "Uptime: " + String(millis() / 60000) + " min<br>";
+    html += "IP: " + WiFi.localIP().toString() + "<br>";
+    html += "</div>";
+
+    // Alert test buttons
+    html += "<h2>Test Alerts</h2>"
+            "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px'>"
+            "<button onclick=\"fetch('/test?t=lw')\" style='background:#cc0;color:#000;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Low Warning</button>"
+            "<button onclick=\"fetch('/test?t=la')\" style='background:#c00;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Low Alarm</button>"
+            "<button onclick=\"fetch('/test?t=hw')\" style='background:#cc0;color:#000;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>High Warning</button>"
+            "<button onclick=\"fetch('/test?t=ha')\" style='background:#c00;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>High Alarm</button>"
+            "<button onclick=\"fetch('/test?t=nr')\" style='background:#888;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>No Readings</button>"
+            "</div>";
 
     // Nightscout
     html += "<h2>Nightscout</h2>";
@@ -82,19 +119,21 @@ static void handleRoot() {
     html += numInput("Brightness 2", "brightness2", c.brightness2);
     html += numInput("Brightness 3", "brightness3", c.brightness3);
 
-    // Thresholds
-    html += "<h2>Thresholds</h2>";
-    html += floatInput("Yellow Low", "yellow_low", c.yellow_low);
-    html += floatInput("Yellow High", "yellow_high", c.yellow_high);
-    html += floatInput("Red Low", "red_low", c.red_low);
-    html += floatInput("Red High", "red_high", c.red_high);
+    // Thresholds — display in user's preferred unit
+    bool mg = c.show_mgdl;
+    const char *unit = mg ? "mg/dL" : "mmol/L";
+    html += "<h2>Thresholds (" + String(unit) + ")</h2>";
+    html += floatInput("Yellow Low", "yellow_low", toDisplay(c.yellow_low, mg));
+    html += floatInput("Yellow High", "yellow_high", toDisplay(c.yellow_high, mg));
+    html += floatInput("Red Low", "red_low", toDisplay(c.red_low, mg));
+    html += floatInput("Red High", "red_high", toDisplay(c.red_high, mg));
 
     // Alarms
-    html += "<h2>Alarms</h2>";
-    html += floatInput("Alarm (low)", "snd_alarm", c.snd_alarm);
-    html += floatInput("Warning (low)", "snd_warning", c.snd_warning);
-    html += floatInput("Alarm (high)", "snd_alarm_high", c.snd_alarm_high);
-    html += floatInput("Warning (high)", "snd_warning_high", c.snd_warning_high);
+    html += "<h2>Alarms (" + String(unit) + ")</h2>";
+    html += floatInput("Alarm (low)", "snd_alarm", toDisplay(c.snd_alarm, mg));
+    html += floatInput("Warning (low)", "snd_warning", toDisplay(c.snd_warning, mg));
+    html += floatInput("Alarm (high)", "snd_alarm_high", toDisplay(c.snd_alarm_high, mg));
+    html += floatInput("Warning (high)", "snd_warning_high", toDisplay(c.snd_warning_high, mg));
     html += numInput("No Readings Alarm (min)", "snd_no_readings", c.snd_no_readings);
     html += numInput("Snooze Timeout (min)", "snooze_timeout", c.snooze_timeout);
     html += numInput("Alarm Repeat (min)", "alarm_repeat", c.alarm_repeat);
@@ -151,15 +190,17 @@ static void handleSave() {
     if (server.hasArg("date_format"))        c.date_format = server.arg("date_format").toInt();
     if (server.hasArg("time_format"))        c.time_format = server.arg("time_format").toInt();
 
-    if (server.hasArg("yellow_low"))   c.yellow_low = server.arg("yellow_low").toFloat();
-    if (server.hasArg("yellow_high"))  c.yellow_high = server.arg("yellow_high").toFloat();
-    if (server.hasArg("red_low"))      c.red_low = server.arg("red_low").toFloat();
-    if (server.hasArg("red_high"))     c.red_high = server.arg("red_high").toFloat();
+    // Convert display units back to mmol/L for storage
+    bool mg = c.show_mgdl;
+    if (server.hasArg("yellow_low"))   c.yellow_low = fromDisplay(server.arg("yellow_low").toFloat(), mg);
+    if (server.hasArg("yellow_high"))  c.yellow_high = fromDisplay(server.arg("yellow_high").toFloat(), mg);
+    if (server.hasArg("red_low"))      c.red_low = fromDisplay(server.arg("red_low").toFloat(), mg);
+    if (server.hasArg("red_high"))     c.red_high = fromDisplay(server.arg("red_high").toFloat(), mg);
 
-    if (server.hasArg("snd_alarm"))         c.snd_alarm = server.arg("snd_alarm").toFloat();
-    if (server.hasArg("snd_warning"))       c.snd_warning = server.arg("snd_warning").toFloat();
-    if (server.hasArg("snd_alarm_high"))    c.snd_alarm_high = server.arg("snd_alarm_high").toFloat();
-    if (server.hasArg("snd_warning_high"))  c.snd_warning_high = server.arg("snd_warning_high").toFloat();
+    if (server.hasArg("snd_alarm"))         c.snd_alarm = fromDisplay(server.arg("snd_alarm").toFloat(), mg);
+    if (server.hasArg("snd_warning"))       c.snd_warning = fromDisplay(server.arg("snd_warning").toFloat(), mg);
+    if (server.hasArg("snd_alarm_high"))    c.snd_alarm_high = fromDisplay(server.arg("snd_alarm_high").toFloat(), mg);
+    if (server.hasArg("snd_warning_high"))  c.snd_warning_high = fromDisplay(server.arg("snd_warning_high").toFloat(), mg);
     if (server.hasArg("snd_no_readings"))   c.snd_no_readings = server.arg("snd_no_readings").toInt();
 
     if (server.hasArg("snooze_timeout"))  c.snooze_timeout = server.arg("snooze_timeout").toInt();
@@ -235,6 +276,19 @@ static void handleReboot() {
     ESP.restart();
 }
 
+/* ── GET /test — play an alert sound for testing ──────────────── */
+
+static void handleTest() {
+    const Config &c = *cfgPtr;
+    String t = server.arg("t");
+    if      (t == "lw") playLowWarning(c.warning_volume);
+    else if (t == "la") playLowAlarm(c.alarm_volume);
+    else if (t == "hw") playHighWarning(c.warning_volume);
+    else if (t == "ha") playHighAlarm(c.alarm_volume);
+    else if (t == "nr") playNoReadings(c.warning_volume);
+    server.send(200, "text/plain", "OK");
+}
+
 /* ── Public API ────────────────────────────────────────────────── */
 
 void setupWebConfig(Config *cfg) {
@@ -242,6 +296,7 @@ void setupWebConfig(Config *cfg) {
     server.on("/", HTTP_GET, handleRoot);
     server.on("/save", HTTP_POST, handleSave);
     server.on("/reboot", HTTP_POST, handleReboot);
+    server.on("/test", HTTP_GET, handleTest);
     server.begin();
     Serial.printf("[WEBCONFIG] Server started on port 80\n");
 }

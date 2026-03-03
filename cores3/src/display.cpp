@@ -170,12 +170,12 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
     g.setTextColor(TFT_WHITE, TFT_BLACK);
     g.drawString(model.delta_str, 180, 0);
 
-    // Center: glucose value
+    // Center: glucose value — baseline aligned with battery indicator top
     g.setTextColor(mapColor(model.glucose_color), TFT_BLACK);
-    g.setTextDatum(MC_DATUM);
-    g.setTextSize(4);
+    g.setTextDatum(BC_DATUM);
+    g.setTextSize(3);
     g.setFont(mapFont(model.glucose_font));
-    g.drawString(model.glucose_str, 160, 120);
+    g.drawString(model.glucose_str, 160, 224);
     g.setTextSize(1);
 
     // Trend arrow

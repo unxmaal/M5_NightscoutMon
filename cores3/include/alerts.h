@@ -30,4 +30,11 @@ struct AlarmState {
  */
 void checkAlarms(const Config &cfg, const NSinfo &ns, AlarmState &alarm);
 
+/** Individual alert melodies — for testing via web UI. */
+void playLowAlarm(int volume);
+void playLowWarning(int volume);
+void playHighAlarm(int volume);
+void playHighWarning(int volume);
+void playNoReadings(int volume);
+
 #endif // CORES3_ALERTS_H

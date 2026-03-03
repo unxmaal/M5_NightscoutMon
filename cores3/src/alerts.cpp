@@ -38,22 +38,56 @@ void AlarmState::recordFired() {
 
 /* ── Sound helpers ─────────────────────────────────────────────── */
 
-static void playAlarm(int volume) {
-    M5.Speaker.setVolume(volume);
-    // Urgent: three short high beeps
-    for (int i = 0; i < 3; i++) {
-        M5.Speaker.tone(2000, 200);
-        delay(300);
+// Scale config volume (0-100) to speaker range (0-255)
+static int scaleVolume(int vol) {
+    return (vol * 255) / 100;
+}
+
+static void playMelody(int volume, const int *notes, const int *durations, int count) {
+    M5.Speaker.setVolume(scaleVolume(volume));
+    for (int i = 0; i < count; i++) {
+        M5.Speaker.tone(notes[i], durations[i]);
+        delay(durations[i] + 60);
     }
 }
 
-static void playWarning(int volume) {
-    M5.Speaker.setVolume(volume);
-    // Less urgent: two lower beeps
-    for (int i = 0; i < 2; i++) {
-        M5.Speaker.tone(1000, 200);
-        delay(400);
-    }
+// Low alarm: descending tritone + chromatic fall — psychoacoustically urgent
+// B5→F5 (tritone), then chromatic descent E5→Eb5→D5→Db5 (falling sensation)
+// Repeated twice with shorter gaps for urgency
+void playLowAlarm(int volume) {
+    const int notes[]    = { 988, 698,  659, 622, 587, 554,
+                             988, 698,  659, 622, 587, 554 };
+    const int durations[] = { 120, 200,  100, 100, 100, 250,
+                              120, 200,  100, 100, 100, 250 };
+    playMelody(volume, notes, durations, 12);
+}
+
+// Low warning: gentle descending three-note — B5 G5 D5
+void playLowWarning(int volume) {
+    const int notes[]    = { 988, 784, 587 };
+    const int durations[] = { 200, 200, 400 };
+    playMelody(volume, notes, durations, 3);
+}
+
+// High alarm: urgent ascending major — C5 E5 G5 (repeated)
+void playHighAlarm(int volume) {
+    const int notes[]    = { 523, 659, 784,  523, 659, 784 };
+    const int durations[] = { 150, 150, 300,  150, 150, 300 };
+    playMelody(volume, notes, durations, 6);
+}
+
+// High warning: gentle ascending two-note — C5 E5
+void playHighWarning(int volume) {
+    const int notes[]    = { 523, 659 };
+    const int durations[] = { 200, 350 };
+    playMelody(volume, notes, durations, 2);
+}
+
+// No readings / stale data: two-tone attention chime — G5 D5
+void playNoReadings(int volume) {
+    const int notes[]    = { 784, 587 };
+    const int durations[] = { 250, 400 };
+    playMelody(volume, notes, durations, 2);
 }
 
 /* ── Check and fire alarms ─────────────────────────────────────── */
@@ -84,17 +118,25 @@ void checkAlarms(const Config &cfg, const NSinfo &ns, AlarmState &alarm) {
     if (!alarm.shouldFire(cfg.alarm_repeat))
         return;
 
-    // Fire
+    // Fire — each condition has a distinct melody
     switch (level) {
         case ALARM_LEVEL_LOW_ALARM:
+            playLowAlarm(cfg.alarm_volume);
+            break;
         case ALARM_LEVEL_HIGH_ALARM:
-        case ALARM_LEVEL_LOOP_ERROR:
-            playAlarm(cfg.alarm_volume);
+            playHighAlarm(cfg.alarm_volume);
             break;
         case ALARM_LEVEL_LOW_WARNING:
+            playLowWarning(cfg.warning_volume);
+            break;
         case ALARM_LEVEL_HIGH_WARNING:
+            playHighWarning(cfg.warning_volume);
+            break;
         case ALARM_LEVEL_NO_READINGS:
-            playWarning(cfg.warning_volume);
+            playNoReadings(cfg.warning_volume);
+            break;
+        case ALARM_LEVEL_LOOP_ERROR:
+            playHighAlarm(cfg.alarm_volume);
             break;
     }
     alarm.recordFired();
