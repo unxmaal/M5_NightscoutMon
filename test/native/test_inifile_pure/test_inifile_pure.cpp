@@ -160,6 +160,23 @@ void test_parse_mac_null(void) {
     TEST_ASSERT_FALSE(parseMACAddress(NULL, mac));
 }
 
+/* ── Overflow tests ────────────────────────────────────────────── */
+
+void test_parse_ip_overflow_256(void) {
+    uint8_t ip[4] = {0};
+    TEST_ASSERT_FALSE(parseIPAddress("256.0.0.0", ip));
+}
+
+void test_parse_ip_overflow_999(void) {
+    uint8_t ip[4] = {0};
+    TEST_ASSERT_FALSE(parseIPAddress("999.0.0.0", ip));
+}
+
+void test_parse_mac_overflow(void) {
+    uint8_t mac[6] = {0};
+    TEST_ASSERT_FALSE(parseMACAddress("FFF:00:00:00:00:00", mac));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_semicolon_is_comment);
@@ -186,5 +203,8 @@ int main(void) {
     RUN_TEST(test_parse_mac_lowercase);
     RUN_TEST(test_parse_mac_invalid);
     RUN_TEST(test_parse_mac_null);
+    RUN_TEST(test_parse_ip_overflow_256);
+    RUN_TEST(test_parse_ip_overflow_999);
+    RUN_TEST(test_parse_mac_overflow);
     return UNITY_END();
 }

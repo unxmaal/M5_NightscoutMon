@@ -9,6 +9,14 @@
 #include <ctype.h>
 #include <stdio.h>
 
+/* ── Integer clamping ──────────────────────────────────────────── */
+
+int clampInt(int value, int min_val, int max_val) {
+    if (value < min_val) return min_val;
+    if (value > max_val) return max_val;
+    return value;
+}
+
 /* ── CRC-16 ─────────────────────────────────────────────────────── */
 
 uint16_t crc16_update(uint16_t crc, uint8_t a) {
@@ -136,6 +144,70 @@ size_t sanitizeJson(char* buf, size_t len) {
     return len;
 }
 
+/* ── Glucose color level ───────────────────────────────────────── */
+
+int glucoseColor(float sgv, float yellow_low, float yellow_high,
+                 float red_low, float red_high) {
+    int color = GLUCOSE_COLOR_GREEN;
+    if (sgv < yellow_low || sgv > yellow_high)
+        color = GLUCOSE_COLOR_YELLOW;
+    if (sgv < red_low || sgv > red_high)
+        color = GLUCOSE_COLOR_RED;
+    return color;
+}
+
+/* ── Alarm level decision ──────────────────────────────────────── */
+
+int alarmLevel(float sgv, float snd_alarm, float snd_warning,
+               float snd_alarm_high, float snd_warning_high,
+               unsigned int sensor_age_min, unsigned int snd_no_readings,
+               bool has_loop_error) {
+    /* Priority chain: low alarm > low warn > high alarm > high warn > no readings > loop error */
+    if (sgv <= snd_alarm && sgv >= 0.1f)
+        return ALARM_LEVEL_LOW_ALARM;
+    if (sgv <= snd_warning && sgv >= 0.1f)
+        return ALARM_LEVEL_LOW_WARNING;
+    if (sgv >= snd_alarm_high)
+        return ALARM_LEVEL_HIGH_ALARM;
+    if (sgv >= snd_warning_high)
+        return ALARM_LEVEL_HIGH_WARNING;
+    if (sensor_age_min >= snd_no_readings)
+        return ALARM_LEVEL_NO_READINGS;
+    if (has_loop_error)
+        return ALARM_LEVEL_LOOP_ERROR;
+    return ALARM_LEVEL_NORMAL;
+}
+
+/* ── Glucose string formatting ─────────────────────────────────── */
+
+int formatGlucose(char *buf, size_t bufsize,
+                  float sgv_mmol, float sgv_mgdl, bool show_mgdl) {
+    if (show_mgdl) {
+        snprintf(buf, bufsize, "%.0f", sgv_mgdl);
+        return FONT_LARGE;
+    }
+    /* mmol/L */
+    if (sgv_mmol < 10.0f) {
+        snprintf(buf, bufsize, "%.1f", sgv_mmol);
+        return FONT_LARGE;
+    }
+    snprintf(buf, bufsize, "%.1f", sgv_mmol);
+    return FONT_MEDIUM;
+}
+
+/* ── Uptime formatting ─────────────────────────────────────────── */
+
+void formatUptime(char *buf, size_t bufsize, unsigned long ms) {
+    unsigned long total_sec = ms / 1000;
+    int days = (int)(total_sec / 86400);
+    int rem = (int)(total_sec % 86400);
+    int hours = rem / 3600;
+    rem %= 3600;
+    int minutes = rem / 60;
+    int seconds = rem % 60;
+    snprintf(buf, bufsize, "%02dd %02d:%02d:%02d", days, hours, minutes, seconds);
+}
+
 /* ── INI file helpers ───────────────────────────────────────────── */
 
 bool isCommentChar(char c) {
@@ -161,7 +233,7 @@ bool parseIPAddress(const char* str, uint8_t ip[4]) {
 
     int i = 0;
     const char* cp = str;
-    ip[0] = ip[1] = ip[2] = ip[3] = 0;
+    unsigned int accum[4] = {0, 0, 0, 0};
 
     while (*cp != '\0' && i < 4) {
         if (*cp == '.') {
@@ -170,15 +242,22 @@ bool parseIPAddress(const char* str, uint8_t ip[4]) {
             continue;
         }
         if (isdigit((unsigned char)*cp)) {
-            ip[i] *= 10;
-            ip[i] += (*cp - '0');
+            accum[i] = accum[i] * 10 + (*cp - '0');
+            if (accum[i] > 255) {
+                ip[0] = ip[1] = ip[2] = ip[3] = 0;
+                return false;
+            }
         } else {
             ip[0] = ip[1] = ip[2] = ip[3] = 0;
             return false;
         }
         ++cp;
     }
-    return (i == 3);  // must have seen exactly 3 dots
+    if (i != 3)
+        return false;
+    for (int j = 0; j < 4; j++)
+        ip[j] = (uint8_t)accum[j];
+    return true;
 }
 
 bool parseMACAddress(const char* str, uint8_t mac[6]) {
@@ -187,7 +266,7 @@ bool parseMACAddress(const char* str, uint8_t mac[6]) {
 
     int i = 0;
     const char* cp = str;
-    memset(mac, 0, 6);
+    unsigned int accum[6] = {0, 0, 0, 0, 0, 0};
 
     while (*cp != '\0' && i < 6) {
         if (*cp == ':' || *cp == '-') {
@@ -196,16 +275,22 @@ bool parseMACAddress(const char* str, uint8_t mac[6]) {
             continue;
         }
         if (isdigit((unsigned char)*cp)) {
-            mac[i] *= 16;
-            mac[i] += (*cp - '0');
+            accum[i] = accum[i] * 16 + (*cp - '0');
         } else if (isxdigit((unsigned char)*cp)) {
-            mac[i] *= 16;
-            mac[i] += (toupper((unsigned char)*cp) - 55);
+            accum[i] = accum[i] * 16 + (toupper((unsigned char)*cp) - 55);
         } else {
+            memset(mac, 0, 6);
+            return false;
+        }
+        if (accum[i] > 0xFF) {
             memset(mac, 0, 6);
             return false;
         }
         ++cp;
     }
-    return (i == 5);  // must have seen exactly 5 separators
+    if (i != 5)
+        return false;
+    for (int j = 0; j < 6; j++)
+        mac[j] = (uint8_t)accum[j];
+    return true;
 }
