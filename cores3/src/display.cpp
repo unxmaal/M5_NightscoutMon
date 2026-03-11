@@ -114,7 +114,7 @@ static void drawBattery(int x, int y, int pct) {
 
 /* ── Page 0: Large glucose ─────────────────────────────────────── */
 
-void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog) {
+void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog, int snoozeRemSec) {
     // Build the display model — all decisions happen here
     struct tm now;
     long now_sec = 0;
@@ -141,8 +141,6 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
                            cfg.snd_alarm_high, cfg.snd_warning_high,
                            sensorAgeMin, cfg.snd_no_readings, false);
 
-    int snoozeRem = 0;
-
     GlucosePageModel model;
     buildGlucoseModel(&model,
         ns.sensSgv, ns.sensSgvMgDl, cfg.show_mgdl,
@@ -151,7 +149,7 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
         time_hour, time_min,
         now_sec, (long)ns.sensTime,
         cfg.yellow_low, cfg.yellow_high, cfg.red_low, cfg.red_high,
-        level, snoozeRem,
+        level, snoozeRemSec,
         batteryPct, errLog.count);
 
     // ── Render from model ─────────────────────────────────────────
@@ -293,14 +291,57 @@ void drawStatusPage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog)
     drawBattery(296, 226, model.battery_pct);
 }
 
+/* ── Button bar (bottom touch zone labels) ─────────────────────── */
+
+static void drawButtonBar(int snoozeRemSec) {
+    auto &g = gfx();
+
+    int barY = 216;
+    int barH = 24;
+    int textY = barY + barH / 2 + 1;
+    bool snoozed = (snoozeRemSec > 0);
+
+    // Separator line above button zone
+    g.drawFastHLine(0, barY, 320, TFT_DARKGREY);
+
+    // Vertical separators between zones
+    g.drawFastVLine(107, barY, barH, TFT_DARKGREY);
+    g.drawFastVLine(214, barY, barH, TFT_DARKGREY);
+
+    g.setFont(&FreeSans9pt7b);
+    g.setTextSize(1);
+    g.setTextDatum(MC_DATUM);
+
+    // DIM and PAGE labels — always dim
+    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    g.drawString("DIM",  53,  textY);
+    g.drawString("PAGE", 267, textY);
+
+    // Snooze button — highlighted when active, shows remaining time
+    if (snoozed) {
+        int remMin = (snoozeRemSec + 59) / 60;
+        char label[16];
+        snprintf(label, sizeof(label), "ZZZ %dm", remMin);
+        g.fillRect(108, barY + 1, 105, barH - 1, TFT_BLUE);
+        g.setTextColor(TFT_WHITE, TFT_BLUE);
+        g.drawString(label, 160, textY);
+    } else {
+        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.drawString("SNOOZE", 160, textY);
+    }
+}
+
 /* ── Page dispatcher ───────────────────────────────────────────── */
 
-void drawPage(int page, const Config &cfg, const NSinfo &ns, const ErrorLog &errLog) {
+void drawPage(int page, const Config &cfg, const NSinfo &ns, const ErrorLog &errLog,
+              int snoozeRemSec) {
     switch (page) {
-        case PAGE_GLUCOSE: drawGlucosePage(cfg, ns, errLog); break;
+        case PAGE_GLUCOSE: drawGlucosePage(cfg, ns, errLog, snoozeRemSec); break;
         case PAGE_STATUS:  drawStatusPage(cfg, ns, errLog); break;
-        default:           drawGlucosePage(cfg, ns, errLog); break;
+        default:           drawGlucosePage(cfg, ns, errLog, snoozeRemSec); break;
     }
+
+    drawButtonBar(snoozeRemSec);
 
     // Flush canvas to display atomically (zero flicker)
     if (canvasReady) {

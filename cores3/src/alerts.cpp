@@ -7,10 +7,24 @@
 /* ── AlarmState ────────────────────────────────────────────────── */
 
 void AlarmState::snooze(int timeout_min) {
-    snoozeMult++;
     struct tm now;
-    if (getLocalTime(&now, 10)) {
-        snoozeUntil = mktime(&now) + (timeout_min * snoozeMult * 60);
+    if (!getLocalTime(&now, 10))
+        return;
+
+    time_t nowSec = mktime(&now);
+    time_t maxSnooze = nowSec + (120 * 60);
+
+    // If not currently snoozed, start fresh
+    if (snoozeUntil <= nowSec) {
+        snoozeUntil = nowSec + (timeout_min * 60);
+    } else if (snoozeUntil >= maxSnooze) {
+        // Already at max — cancel snooze
+        snoozeUntil = 0;
+    } else {
+        // Extend by one increment
+        snoozeUntil += (timeout_min * 60);
+        if (snoozeUntil > maxSnooze)
+            snoozeUntil = maxSnooze;
     }
 }
 

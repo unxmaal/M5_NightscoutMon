@@ -18,7 +18,8 @@ void initCanvas();
  * Draw the large glucose screen.
  * Shows: time, delta, huge glucose number, trend arrow, status line.
  */
-void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog);
+void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog,
+                     int snoozeRemSec);
 
 /**
  * Draw the error log / status screen.
@@ -28,8 +29,10 @@ void drawStatusPage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog)
 
 /**
  * Draw the current page based on page number.
+ * snoozeRemSec: seconds remaining in snooze (0 if not snoozed).
  */
-void drawPage(int page, const Config &cfg, const NSinfo &ns, const ErrorLog &errLog);
+void drawPage(int page, const Config &cfg, const NSinfo &ns, const ErrorLog &errLog,
+              int snoozeRemSec);
 
 /**
  * Draw the trend arrow at (x, y) with given color.

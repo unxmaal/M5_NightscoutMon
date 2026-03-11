@@ -9,9 +9,8 @@
 struct AlarmState {
     time_t lastAlarmTime = 0;
     time_t snoozeUntil   = 0;
-    int    snoozeMult    = 0;
 
-    /** Snooze alarms for cfg.snooze_timeout minutes (stacks on repeat press). */
+    /** Snooze alarms: adds timeout_min per press, capped at 2 hours. */
     void snooze(int timeout_min);
 
     /** Returns seconds remaining in snooze, or 0. */

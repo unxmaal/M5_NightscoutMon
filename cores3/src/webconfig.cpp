@@ -8,6 +8,13 @@
 
 static WebServer server(80);
 static Config *cfgPtr = nullptr;
+static AlarmState *alarmPtr = nullptr;
+
+// Repeating test alarm state
+static bool testAlarmActive = false;
+static int testAlarmType = 0;          // 0=none, 1=low warn, 2=low alarm, 3=high warn, 4=high alarm, 5=no readings
+static unsigned long testAlarmNextMs = 0;
+static const unsigned long TEST_ALARM_INTERVAL_MS = 5000;
 
 /* ── HTML helpers ──────────────────────────────────────────────── */
 
@@ -91,13 +98,23 @@ static void handleRoot() {
 
     // Alert test buttons
     html += "<h2>Test Alerts</h2>"
-            "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px'>"
-            "<button onclick=\"fetch('/test?t=lw')\" style='background:#cc0;color:#000;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Low Warning</button>"
+            "<p style='color:#888;font-size:13px;margin:0 0 8px'>One-shot plays once. Repeating loops every 5s until snoozed or stopped.</p>"
+            "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px'>"
+            "<button onclick=\"fetch('/test?t=lw')\" style='background:#cc0;color:#000;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Low Warn</button>"
             "<button onclick=\"fetch('/test?t=la')\" style='background:#c00;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Low Alarm</button>"
-            "<button onclick=\"fetch('/test?t=hw')\" style='background:#cc0;color:#000;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>High Warning</button>"
+            "<button onclick=\"fetch('/test?t=hw')\" style='background:#cc0;color:#000;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>High Warn</button>"
             "<button onclick=\"fetch('/test?t=ha')\" style='background:#c00;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>High Alarm</button>"
             "<button onclick=\"fetch('/test?t=nr')\" style='background:#888;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>No Readings</button>"
-            "</div>";
+            "</div>"
+            "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px'>"
+            "<button onclick=\"fetch('/test?t=la&r=1').then(()=>document.getElementById('ts').textContent='Repeating: Low Alarm')\" style='background:#800;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Repeat Low Alarm</button>"
+            "<button onclick=\"fetch('/test?t=ha&r=1').then(()=>document.getElementById('ts').textContent='Repeating: High Alarm')\" style='background:#800;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer'>Repeat High Alarm</button>"
+            "</div>"
+            "<div style='display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px'>"
+            "<button onclick=\"fetch('/snooze').then(()=>document.getElementById('ts').textContent='Snoozed')\" style='background:#06c;color:#fff;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;font-weight:bold'>Snooze</button>"
+            "<button onclick=\"fetch('/test?t=stop').then(()=>document.getElementById('ts').textContent='Stopped')\" style='background:#444;color:#fff;padding:8px 16px;border:none;border-radius:4px;cursor:pointer'>Stop</button>"
+            "</div>"
+            "<div id='ts' style='color:#0cf;font-size:14px;min-height:20px;margin-bottom:8px'></div>";
 
     // Nightscout
     html += "<h2>Nightscout</h2>";
@@ -278,29 +295,90 @@ static void handleReboot() {
 
 /* ── GET /test — play an alert sound for testing ──────────────── */
 
+static void playTestByType(int type, const Config &c) {
+    switch (type) {
+        case 1: playLowWarning(c.warning_volume); break;
+        case 2: playLowAlarm(c.alarm_volume); break;
+        case 3: playHighWarning(c.warning_volume); break;
+        case 4: playHighAlarm(c.alarm_volume); break;
+        case 5: playNoReadings(c.warning_volume); break;
+    }
+}
+
+static int parseTestType(const String &t) {
+    if (t == "lw") return 1;
+    if (t == "la") return 2;
+    if (t == "hw") return 3;
+    if (t == "ha") return 4;
+    if (t == "nr") return 5;
+    return 0;
+}
+
 static void handleTest() {
     const Config &c = *cfgPtr;
     String t = server.arg("t");
-    if      (t == "lw") playLowWarning(c.warning_volume);
-    else if (t == "la") playLowAlarm(c.alarm_volume);
-    else if (t == "hw") playHighWarning(c.warning_volume);
-    else if (t == "ha") playHighAlarm(c.alarm_volume);
-    else if (t == "nr") playNoReadings(c.warning_volume);
+    bool repeat = server.hasArg("r") && server.arg("r") == "1";
+
+    if (t == "stop") {
+        testAlarmActive = false;
+        testAlarmType = 0;
+        Serial.println("[WEBCONFIG] Test alarm stopped");
+        server.send(200, "text/plain", "OK");
+        return;
+    }
+
+    int type = parseTestType(t);
+    if (type > 0) {
+        playTestByType(type, c);
+        if (repeat) {
+            testAlarmActive = true;
+            testAlarmType = type;
+            testAlarmNextMs = millis() + TEST_ALARM_INTERVAL_MS;
+            Serial.printf("[WEBCONFIG] Repeating test alarm type %d started\n", type);
+        }
+    }
+    server.send(200, "text/plain", "OK");
+}
+
+static void handleSnooze() {
+    if (alarmPtr) {
+        alarmPtr->snooze(cfgPtr->snooze_timeout);
+        // Stop repeating test alarm when snooze is pressed
+        testAlarmActive = false;
+        testAlarmType = 0;
+        Serial.printf("[WEBCONFIG] Snooze activated (%d sec remaining)\n",
+                      alarmPtr->snoozeRemaining());
+    }
     server.send(200, "text/plain", "OK");
 }
 
 /* ── Public API ────────────────────────────────────────────────── */
 
-void setupWebConfig(Config *cfg) {
+void setupWebConfig(Config *cfg, AlarmState *alarm) {
     cfgPtr = cfg;
+    alarmPtr = alarm;
     server.on("/", HTTP_GET, handleRoot);
     server.on("/save", HTTP_POST, handleSave);
     server.on("/reboot", HTTP_POST, handleReboot);
     server.on("/test", HTTP_GET, handleTest);
+    server.on("/snooze", HTTP_GET, handleSnooze);
     server.begin();
     Serial.printf("[WEBCONFIG] Server started on port 80\n");
 }
 
 void handleWebConfig() {
     server.handleClient();
+
+    // Pump repeating test alarm
+    if (testAlarmActive && millis() >= testAlarmNextMs) {
+        // Stop if snoozed
+        if (alarmPtr && alarmPtr->snoozeRemaining() > 0) {
+            testAlarmActive = false;
+            testAlarmType = 0;
+            Serial.println("[WEBCONFIG] Test alarm silenced by snooze");
+        } else {
+            playTestByType(testAlarmType, *cfgPtr);
+            testAlarmNextMs = millis() + TEST_ALARM_INTERVAL_MS;
+        }
+    }
 }

@@ -153,7 +153,7 @@ static void pollNightscout() {
     }
     pollCount++;
 
-    drawPage(currentPage, cfg, ns, errLog);
+    drawPage(currentPage, cfg, ns, errLog, alarmState.snoozeRemaining());
 }
 
 /* ── Setup ─────────────────────────────────────────────────────── */
@@ -223,7 +223,7 @@ void setup() {
     // OTA updates (only useful once WiFi is connected)
     if (WiFi.status() == WL_CONNECTED) {
         setupOTA(cfg.deviceName);
-        setupWebConfig(&cfg);
+        setupWebConfig(&cfg, &alarmState);
     }
 
     // Initial fetch (will fail without WiFi — that's OK)
@@ -233,7 +233,7 @@ void setup() {
 
     Serial.println("[DISPLAY] Drawing initial page...");
     Serial.flush();
-    drawPage(currentPage, cfg, ns, errLog);
+    drawPage(currentPage, cfg, ns, errLog, 0);
     Serial.printf("[DISPLAY] Page %d drawn (glucose=%.1f mmol, dir=%s)\n",
                   currentPage, ns.sensSgv, ns.sensDir);
     Serial.flush();
@@ -246,40 +246,25 @@ void setup() {
 void loop() {
     M5.update();
 
-    // CoreS3 touch → virtual button mapping (touch panel covers display only)
-    auto t = M5.Touch.getDetail();
-    if (t.isPressed() && t.y >= 200) {
-        int zone = t.x / 107;  // 0=left, 1=mid, 2=right (320/3)
-        M5.BtnA.setRawState(t.wasPressed() ? 0 : 0, zone == 0);
-        M5.BtnB.setRawState(t.wasPressed() ? 0 : 0, zone == 1);
-        M5.BtnC.setRawState(t.wasPressed() ? 0 : 0, zone == 2);
-    } else if (t.wasReleased()) {
-        M5.BtnA.setRawState(0, false);
-        M5.BtnB.setRawState(0, false);
-        M5.BtnC.setRawState(0, false);
-    }
-
     handleOTA();
     handleWebConfig();
 
-    // Button A (left touch zone): cycle brightness
-    if (M5.BtnA.wasPressed()) {
-        Serial.println("[BTN] A pressed");
-        cycleBrightness();
-    }
-
-    // Button B (middle): snooze
-    if (M5.BtnB.wasPressed()) {
-        Serial.println("[BTN] B pressed");
-        alarmState.snooze(cfg.snooze_timeout);
-        drawPage(currentPage, cfg, ns, errLog);
-    }
-
-    // Button C (right): toggle page
-    if (M5.BtnC.wasPressed()) {
-        Serial.println("[BTN] C pressed");
-        currentPage = (currentPage + 1) % NUM_PAGES;
-        drawPage(currentPage, cfg, ns, errLog);
+    // CoreS3 touch → button zones (bottom 40px of display)
+    auto t = M5.Touch.getDetail();
+    if (t.wasPressed() && t.y >= 200) {
+        int zone = t.x / 107;  // 0=left, 1=mid, 2=right (320/3)
+        if (zone == 0) {
+            Serial.println("[BTN] A pressed (brightness)");
+            cycleBrightness();
+        } else if (zone == 1) {
+            Serial.println("[BTN] B pressed (snooze)");
+            alarmState.snooze(cfg.snooze_timeout);
+            drawPage(currentPage, cfg, ns, errLog, alarmState.snoozeRemaining());
+        } else {
+            Serial.println("[BTN] C pressed (page)");
+            currentPage = (currentPage + 1) % NUM_PAGES;
+            drawPage(currentPage, cfg, ns, errLog, alarmState.snoozeRemaining());
+        }
     }
 
     // Poll Nightscout + redraw
