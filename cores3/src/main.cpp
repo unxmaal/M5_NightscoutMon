@@ -28,6 +28,10 @@ static int  pollCount         = 0;
 
 static const char *ntpServer = "pool.ntp.org";
 
+static bool       wifiWasConnected = false;
+static unsigned long lastWifiCheck = 0;
+static const unsigned long WIFI_CHECK_INTERVAL_MS = 10000;  // check every 10s
+
 /* ── Config loading from SD card INI ──────────────────────────── */
 
 static bool loadConfigFromSD() {
@@ -67,7 +71,7 @@ static bool loadConfigFromSD() {
 
 /* ── WiFi ──────────────────────────────────────────────────────── */
 
-static void connectWiFi() {
+static void setupWiFiAPs() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
@@ -83,18 +87,16 @@ static void connectWiFi() {
     // Wokwi virtual network — harmless on real hardware (AP won't exist)
     wifiMulti.addAP("Wokwi-GUEST", "");
 
-    if (apCount == 0) {
+    if (apCount == 0)
         Serial.println("[WIFI] No user SSIDs configured (Wokwi-GUEST added as fallback)");
-    }
+    else
+        Serial.printf("[WIFI] %d APs configured\n", apCount);
+}
 
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.setFont(&FreeSans9pt7b);
-    M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.drawString("Connecting WiFi...", 10, 100);
-
-    Serial.printf("[WIFI] Connecting (%d APs)...\n", apCount);
+static bool connectWiFi(int maxAttempts) {
+    Serial.printf("[WIFI] Connecting (up to %d attempts)...\n", maxAttempts);
     int attempts = 0;
-    while (wifiMulti.run() != WL_CONNECTED && attempts < 10) {
+    while (wifiMulti.run() != WL_CONNECTED && attempts < maxAttempts) {
         delay(500);
         attempts++;
     }
@@ -102,28 +104,58 @@ static void connectWiFi() {
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("[WIFI] Connected, IP: %s\n",
                    WiFi.localIP().toString().c_str());
-        M5.Display.fillScreen(TFT_BLACK);
-        M5.Display.drawString("WiFi connected", 10, 100);
-        M5.Display.drawString(WiFi.localIP().toString().c_str(), 10, 120);
-        delay(1000);
+        return true;
+    }
+    Serial.println("[WIFI] Connection failed");
+    return false;
+}
 
-        // NTP time sync
-        Serial.println("[NTP] Syncing time...");
-        configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
-        struct tm timeinfo;
-        for (int i = 0; i < 10; i++) {
-            if (getLocalTime(&timeinfo, 10)) {
-                Serial.println("[NTP] Time synced");
-                break;
-            }
-            delay(1000);
+static void syncNTP() {
+    Serial.println("[NTP] Syncing time...");
+    configTime(cfg.timeZone, cfg.dst, ntpServer, "time.nist.gov", "time.google.com");
+    struct tm timeinfo;
+    for (int i = 0; i < 10; i++) {
+        if (getLocalTime(&timeinfo, 10)) {
+            Serial.println("[NTP] Time synced");
+            return;
         }
-    } else {
-        Serial.println("[WIFI] Connection failed");
-        M5.Display.fillScreen(TFT_BLACK);
-        M5.Display.setTextColor(TFT_RED, TFT_BLACK);
-        M5.Display.drawString("WiFi FAILED", 10, 100);
         delay(1000);
+    }
+    Serial.println("[NTP] Sync failed");
+}
+
+static void onWiFiConnected() {
+    wifiWasConnected = true;
+    syncNTP();
+    setupOTA(cfg.deviceName);
+    setupWebConfig(&cfg, &alarmState);
+}
+
+// Non-blocking WiFi check — called from loop()
+static void checkWiFi() {
+    if (millis() - lastWifiCheck < WIFI_CHECK_INTERVAL_MS)
+        return;
+    lastWifiCheck = millis();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        if (!wifiWasConnected) {
+            Serial.println("[WIFI] Reconnected");
+            onWiFiConnected();
+        }
+        return;
+    }
+
+    // Disconnected
+    if (wifiWasConnected) {
+        Serial.println("[WIFI] Connection lost, will retry...");
+        wifiWasConnected = false;
+    }
+
+    // Non-blocking single attempt via wifiMulti.run()
+    if (wifiMulti.run() == WL_CONNECTED) {
+        Serial.printf("[WIFI] Reconnected, IP: %s\n",
+                   WiFi.localIP().toString().c_str());
+        onWiFiConnected();
     }
 }
 
@@ -218,18 +250,28 @@ void setup() {
     M5.Display.drawString("CoreS3", 160, 100);
     Serial.println("[DISPLAY] Splash screen drawn");
 
-    connectWiFi();
+    setupWiFiAPs();
 
-    // OTA updates (only useful once WiFi is connected)
-    if (WiFi.status() == WL_CONNECTED) {
-        setupOTA(cfg.deviceName);
-        setupWebConfig(&cfg, &alarmState);
+    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    M5.Display.setFont(&FreeSans9pt7b);
+    M5.Display.setTextDatum(TL_DATUM);
+    M5.Display.drawString("Connecting WiFi...", 10, 130);
+
+    if (connectWiFi(10)) {
+        M5.Display.drawString("WiFi connected", 10, 150);
+        M5.Display.drawString(WiFi.localIP().toString().c_str(), 10, 170);
+        delay(500);
+        onWiFiConnected();
+
+        // Initial fetch
+        Serial.println("[NS] Initial Nightscout fetch...");
+        int nsRc = readNightscout(cfg, ns, errLog);
+        Serial.printf("[NS] Result: %d, errors logged: %d\n", nsRc, errLog.count);
+    } else {
+        M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
+        M5.Display.drawString("WiFi not found - retrying in background", 10, 150);
+        delay(1000);
     }
-
-    // Initial fetch (will fail without WiFi — that's OK)
-    Serial.println("[NS] Initial Nightscout fetch...");
-    int nsRc = readNightscout(cfg, ns, errLog);
-    Serial.printf("[NS] Result: %d, errors logged: %d\n", nsRc, errLog.count);
 
     Serial.println("[DISPLAY] Drawing initial page...");
     Serial.flush();
@@ -246,8 +288,14 @@ void setup() {
 void loop() {
     M5.update();
 
-    handleOTA();
-    handleWebConfig();
+    // WiFi monitoring — reconnects in background if dropped
+    checkWiFi();
+
+    // OTA + web config only when connected
+    if (wifiWasConnected) {
+        handleOTA();
+        handleWebConfig();
+    }
 
     // CoreS3 touch → button zones (bottom 40px of display)
     auto t = M5.Touch.getDetail();
@@ -267,14 +315,19 @@ void loop() {
         }
     }
 
-    // Poll Nightscout + redraw
-    pollNightscout();
+    // Poll Nightscout + redraw (skip if WiFi is down)
+    if (wifiWasConnected)
+        pollNightscout();
+    else
+        drawPage(currentPage, cfg, ns, errLog, alarmState.snoozeRemaining());
 
-    // Check alarms
+    // Check alarms (still fires on stale data even without WiFi)
     checkAlarms(cfg, ns, alarmState);
 
-    // Auto-restart on too many errors
+    // Auto-restart on too many errors (only count when WiFi is up,
+    // so we don't reboot-loop on WiFi loss)
     if (cfg.restart_at_logged_errors > 0 &&
+        wifiWasConnected &&
         errLog.count >= cfg.restart_at_logged_errors) {
         ESP.restart();
     }
