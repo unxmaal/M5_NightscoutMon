@@ -153,67 +153,84 @@ void drawGlucosePage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog
         batteryPct, errLog.count);
 
     // ── Render from model ─────────────────────────────────────────
+    //
+    // Layout:
+    //   Top-left: time (small)   Top-center: HUGE glucose   Top-right: battery
+    //   Middle: (reserved for sparkline)
+    //   Bottom-left: delta      Bottom-right: staleness
+    //   Button bar at y >= 200
 
     auto &g = gfx();
 
+    int buttonBarY = 200;
+
     g.fillRect(0, 0, 320, 240, TFT_BLACK);
 
-    // Top bar: time (left), delta (right)
+    // Top-left: time (small)
     g.setTextSize(1);
     g.setTextDatum(TL_DATUM);
     g.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    g.setFont(&FreeSansBold24pt7b);
-    g.drawString(model.time_str, 0, 0);
+    g.setFont(&FreeSans9pt7b);
+    g.drawString(model.time_str, 2, 2);
 
-    g.setTextColor(TFT_WHITE, TFT_BLACK);
-    g.drawString(model.delta_str, 180, 0);
+    // Top-right: battery
+    drawBattery(296, 4, model.battery_pct);
 
-    // Center: glucose value — baseline aligned with battery indicator top
+    // Top-center: glucose — huge
     g.setTextColor(mapColor(model.glucose_color), TFT_BLACK);
-    g.setTextDatum(BC_DATUM);
+    g.setTextDatum(TC_DATUM);
     g.setTextSize(3);
     g.setFont(mapFont(model.glucose_font));
-    g.drawString(model.glucose_str, 160, 224);
+    g.drawString(model.glucose_str, 160, 0);
     g.setTextSize(1);
 
-    // Trend arrow
-    int arrowY = 0;
-    if (model.arrow_angle >= 45)
-        arrowY = 4;
-    else if (model.arrow_angle > -45)
-        arrowY = 18;
-    else
-        arrowY = 30;
-    drawArrow(280, arrowY, 10, model.arrow_angle, mapColor(model.arrow_color));
+    // Sparkline — middle area between glucose and info row
+    int sparkY = 95;
+    int infoRowY = buttonBarY - 22;
+    int sparkH = infoRowY - sparkY - 4;
 
-    // Sensor staleness
-    if (model.show_age) {
-        g.setTextDatum(TR_DATUM);
-        g.setTextColor(mapColor(model.age_color), TFT_BLACK);
-        g.setFont(&FreeSans9pt7b);
-        g.drawString(model.age_str, 318, 45);
+    SparklineModel spark;
+    buildSparklineModel(&spark, ns.histSgvMgDl, ns.histCount,
+                        10, sparkY, 300, sparkH,
+                        cfg.yellow_low, cfg.yellow_high,
+                        cfg.red_low, cfg.red_high);
+
+    if (spark.count >= 2) {
+        // Connecting lines (subtle)
+        for (int i = 0; i < spark.count - 1; i++) {
+            g.drawLine(spark.points[i].x, spark.points[i].y,
+                       spark.points[i+1].x, spark.points[i+1].y,
+                       TFT_DARKGREY);
+        }
+        // Diamonds
+        for (int i = 0; i < spark.count; i++) {
+            uint16_t c = mapColor(spark.points[i].color);
+            int px = spark.points[i].x;
+            int py = spark.points[i].y;
+            g.fillTriangle(px, py-3, px-3, py, px+3, py, c);
+            g.fillTriangle(px, py+3, px-3, py, px+3, py, c);
+        }
     }
 
-    // Bottom bar
-    drawBattery(296, 226, model.battery_pct);
+    // Info row: delta (left), staleness (right)
+    g.setTextDatum(BL_DATUM);
+    g.setTextColor(TFT_WHITE, TFT_BLACK);
+    g.setFont(&FreeSansBold12pt7b);
+    g.drawString(model.delta_str, 4, buttonBarY - 4);
 
+    if (model.show_age) {
+        g.setTextDatum(BR_DATUM);
+        g.setTextColor(mapColor(model.age_color), TFT_BLACK);
+        g.setFont(&FreeSans9pt7b);
+        g.drawString(model.age_str, 318, buttonBarY - 4);
+    }
+
+    // Error badge — top-left next to time
     if (model.show_error_badge) {
         g.setTextDatum(TL_DATUM);
         g.setTextColor(TFT_RED, TFT_BLACK);
         g.setFont(&FreeSans9pt7b);
-        g.drawString("!", 2, 224);
-    }
-
-    // Alarm bar
-    if (model.show_alarm_bar) {
-        g.fillRect(0, 220, 320, 20, mapColor(model.alarm_bar_bg));
-        if (model.alarm_bar_text[0] != '\0') {
-            g.setTextDatum(MC_DATUM);
-            g.setTextColor(mapColor(model.alarm_bar_fg),
-                                    mapColor(model.alarm_bar_bg));
-            g.setFont(&FreeSansBold12pt7b);
-            g.drawString(model.alarm_bar_text, 160, 230);
-        }
+        g.drawString("!", 60, 2);
     }
 }
 
@@ -296,28 +313,28 @@ void drawStatusPage(const Config &cfg, const NSinfo &ns, const ErrorLog &errLog)
 static void drawButtonBar(int snoozeRemSec) {
     auto &g = gfx();
 
-    int barY = 216;
-    int barH = 24;
-    int textY = barY + barH / 2 + 1;
+    int barY = 200;
+    int barH = 40;
+    int textY = barY + barH / 2;
     bool snoozed = (snoozeRemSec > 0);
 
-    // Separator line above button zone
-    g.drawFastHLine(0, barY, 320, TFT_DARKGREY);
+    // Top border
+    g.drawFastHLine(0, barY, 320, TFT_LIGHTGREY);
 
-    // Vertical separators between zones
-    g.drawFastVLine(107, barY, barH, TFT_DARKGREY);
-    g.drawFastVLine(214, barY, barH, TFT_DARKGREY);
+    // Vertical dividers
+    g.drawFastVLine(107, barY, barH, TFT_LIGHTGREY);
+    g.drawFastVLine(213, barY, barH, TFT_LIGHTGREY);
 
-    g.setFont(&FreeSans9pt7b);
+    g.setFont(&FreeSansBold12pt7b);
     g.setTextSize(1);
     g.setTextDatum(MC_DATUM);
 
-    // DIM and PAGE labels — always dim
-    g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    // DIM and PAGE — white text
+    g.setTextColor(TFT_WHITE, TFT_BLACK);
     g.drawString("DIM",  53,  textY);
     g.drawString("PAGE", 267, textY);
 
-    // Snooze button — highlighted when active, shows remaining time
+    // Snooze button — blue highlight when active
     if (snoozed) {
         int remMin = (snoozeRemSec + 59) / 60;
         char label[16];
@@ -326,7 +343,7 @@ static void drawButtonBar(int snoozeRemSec) {
         g.setTextColor(TFT_WHITE, TFT_BLUE);
         g.drawString(label, 160, textY);
     } else {
-        g.setTextColor(TFT_DARKGREY, TFT_BLACK);
+        g.setTextColor(TFT_WHITE, TFT_BLACK);
         g.drawString("SNOOZE", 160, textY);
     }
 }

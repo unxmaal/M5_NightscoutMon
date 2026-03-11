@@ -119,6 +119,70 @@ void buildGlucoseModel(
     }
 }
 
+/* ── Sparkline ─────────────────────────────────────────────────── */
+
+void buildSparklineModel(
+    SparklineModel *model,
+    const float *sgv_mgdl, int count,
+    int area_x, int area_y, int area_w, int area_h,
+    float yellow_low, float yellow_high,
+    float red_low, float red_high
+) {
+    memset(model, 0, sizeof(*model));
+
+    if (!sgv_mgdl || count < 2 || area_w <= 0 || area_h <= 0)
+        return;
+
+    if (count > SPARKLINE_MAX_POINTS)
+        count = SPARKLINE_MAX_POINTS;
+
+    // Find min/max across all values
+    float vmin = sgv_mgdl[0], vmax = sgv_mgdl[0];
+    for (int i = 1; i < count; i++) {
+        if (sgv_mgdl[i] < vmin) vmin = sgv_mgdl[i];
+        if (sgv_mgdl[i] > vmax) vmax = sgv_mgdl[i];
+    }
+
+    // Minimum range of 20 mg/dL to avoid flat line
+    float range = vmax - vmin;
+    if (range < 20.0f) {
+        float mid = (vmin + vmax) / 2.0f;
+        vmin = mid - 10.0f;
+        vmax = mid + 10.0f;
+    }
+
+    // 10% padding on each side
+    float pad = (vmax - vmin) * 0.1f;
+    vmin -= pad;
+    vmax += pad;
+    range = vmax - vmin;
+
+    model->count = count;
+
+    for (int i = 0; i < count; i++) {
+        // X: newest (i=0) on the right, oldest on left
+        if (count == 1)
+            model->points[i].x = area_x + area_w / 2;
+        else
+            model->points[i].x = area_x + area_w - 1
+                                 - (i * (area_w - 1)) / (count - 1);
+
+        // Y: high glucose = top (low Y), low glucose = bottom (high Y)
+        float norm = (sgv_mgdl[i] - vmin) / range;  // 0..1
+        model->points[i].y = area_y + area_h - 1
+                             - (int)(norm * (area_h - 1));
+
+        // Color based on thresholds
+        float mmol = sgv_mgdl[i] / 18.0f;
+        int cl = glucoseColor(mmol, yellow_low, yellow_high, red_low, red_high);
+        switch (cl) {
+            case GLUCOSE_COLOR_YELLOW: model->points[i].color = COLOR_YELLOW; break;
+            case GLUCOSE_COLOR_RED:    model->points[i].color = COLOR_RED; break;
+            default:                   model->points[i].color = COLOR_GREEN; break;
+        }
+    }
+}
+
 /* ── Status page ───────────────────────────────────────────────── */
 
 void buildStatusModel(

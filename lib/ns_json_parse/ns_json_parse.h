@@ -41,12 +41,24 @@ struct DeltaInfo {
 #define PARSE_ERR_EMPTY      -2   // Valid JSON but no SGV entries
 #define PARSE_ERR_NO_SGV     -3   // Array exists but no entry has "sgv"
 
+#define SGV_HISTORY_MAX 10
+
 /**
  * Parse a Nightscout /api/v1/entries.json response.
  * Populates entry with the first SGV-containing object.
  * Returns PARSE_OK on success, PARSE_ERR_* on failure.
  */
 int parseSGVResponse(const char *json, size_t len, SGVEntry *entry);
+
+/**
+ * Parse a Nightscout /api/v1/entries.json response, extracting ALL SGV entries.
+ * entries[]: output array, newest-first (same order as Nightscout returns).
+ * max_entries: capacity of entries[] (typically SGV_HISTORY_MAX).
+ * Returns number of entries found. Sets *parse_rc to PARSE_OK/ERR_*.
+ */
+int parseSGVResponseMulti(const char *json, size_t len,
+                          SGVEntry *entries, int max_entries,
+                          int *parse_rc);
 
 /**
  * Parse a Sugarmate API response (single object, not array).

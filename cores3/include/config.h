@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <time.h>
 #include "ns_config_parse.h"
+#include "ns_json_parse.h"
 
 /* ── Device config (loaded from SD card INI) ───────────────────── */
 
@@ -27,6 +28,10 @@ struct NSinfo {
     int      delta_mgdl    = 0;
     float    delta_scaled  = 0;       // mmol/L
     char     delta_display[16];
+
+    /* Glucose history for sparkline (newest at index 0) */
+    float    histSgvMgDl[SGV_HISTORY_MAX];
+    int      histCount     = 0;
 };
 
 /* ── Error log ─────────────────────────────────────────────────── */

@@ -125,14 +125,17 @@ static int fetchSGV(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
     if (rc != 0)
         return rc;
 
-    SGVEntry entry;
+    SGVEntry entries[SGV_HISTORY_MAX];
     DeltaInfo delta;
     int parseResult;
+    int entryCount = 0;
 
     if (isSugarmate) {
-        parseResult = parseSugarmateResponse(buf, bufLen, &entry, &delta);
+        parseResult = parseSugarmateResponse(buf, bufLen, &entries[0], &delta);
+        if (parseResult == PARSE_OK)
+            entryCount = 1;
     } else {
-        parseResult = parseSGVResponse(buf, bufLen, &entry);
+        entryCount = parseSGVResponseMulti(buf, bufLen, entries, SGV_HISTORY_MAX, &parseResult);
     }
     delete[] buf;
 
@@ -142,15 +145,20 @@ static int fetchSGV(const Config &cfg, NSinfo &ns, ErrorLog &errLog) {
         return code;
     }
 
-    // Map SGVEntry → NSinfo
-    strlcpy(ns.sensDev, entry.device, sizeof(ns.sensDev));
-    ns.rawtime = entry.date_ms;
-    ns.sensTime = entry.date_sec;
+    // First entry → existing NSinfo fields
+    strlcpy(ns.sensDev, entries[0].device, sizeof(ns.sensDev));
+    ns.rawtime = entries[0].date_ms;
+    ns.sensTime = entries[0].date_sec;
     localtime_r(&ns.sensTime, &ns.sensTm);
-    strlcpy(ns.sensDir, entry.direction, sizeof(ns.sensDir));
-    ns.sensSgvMgDl = entry.sgv_mgdl;
-    ns.sensSgv = entry.sgv_mmol;
-    ns.arrowAngle = entry.arrow_angle;
+    strlcpy(ns.sensDir, entries[0].direction, sizeof(ns.sensDir));
+    ns.sensSgvMgDl = entries[0].sgv_mgdl;
+    ns.sensSgv = entries[0].sgv_mmol;
+    ns.arrowAngle = entries[0].arrow_angle;
+
+    // All entries → history buffer for sparkline
+    ns.histCount = entryCount;
+    for (int i = 0; i < entryCount; i++)
+        ns.histSgvMgDl[i] = entries[i].sgv_mgdl;
 
     // Sugarmate provides delta in the SGV response
     if (isSugarmate) {

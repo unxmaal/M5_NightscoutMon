@@ -98,6 +98,21 @@ struct StatusPageModel {
     int  battery_pct;
 };
 
+/* ── Sparkline model ───────────────────────────────────────────── */
+
+#define SPARKLINE_MAX_POINTS 10
+
+struct SparklinePoint {
+    int x;
+    int y;
+    int color;       // COLOR_GREEN / COLOR_YELLOW / COLOR_RED
+};
+
+struct SparklineModel {
+    int count;       // 0 = nothing to draw
+    SparklinePoint points[SPARKLINE_MAX_POINTS];
+};
+
 /* ── Model builders (pure functions, no hardware) ──────────────── */
 
 #ifdef __cplusplus
@@ -142,6 +157,21 @@ void buildStatusModel(
     unsigned long heap_free, unsigned long uptime_ms,
     const char *ip_str, const char *version,
     int battery_pct
+);
+
+/**
+ * Build a sparkline from glucose history.
+ * sgv_mgdl[]: array of mg/dL values, newest-first (index 0 = most recent).
+ * count: number of valid entries (up to SPARKLINE_MAX_POINTS).
+ * area_x/y/w/h: pixel bounds for the sparkline area.
+ * Thresholds are in mmol/L (same as config).
+ */
+void buildSparklineModel(
+    SparklineModel *model,
+    const float *sgv_mgdl, int count,
+    int area_x, int area_y, int area_w, int area_h,
+    float yellow_low, float yellow_high,
+    float red_low, float red_high
 );
 
 #ifdef __cplusplus
